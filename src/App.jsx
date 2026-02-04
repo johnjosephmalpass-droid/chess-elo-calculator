@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import CoachFeedback from "./CoachFeedback";
 
 /**
  * Chess Elo Calculator (polished + castling + flipped board)
@@ -476,9 +477,14 @@ function evalBoard(board) {
   return score;
 }
 
-function pickBotMove(board, side, strength, castle) {
+function pickBotMove(board, side, strength, castle, personality) {
   const moves = legalMoves(board, side, castle);
   if (moves.length === 0) return null;
+
+  const bias = personality?.strengthBias ?? 0;
+  const chaos = personality?.chaos ?? 0.3;
+  const blunderChance = personality?.blunderChance ?? 0;
+  const effectiveStrength = clamp(strength + bias, 10, 98);
 
   const scored = moves.map((mv) => {
     const nb = applyMove(board, mv);
@@ -488,8 +494,14 @@ function pickBotMove(board, side, strength, castle) {
 
   scored.sort((a, b) => b.s - a.s);
 
-  const K = Math.max(1, Math.min(scored.length, Math.round(1 + (100 - strength) / 8)));
+  const chaosBoost = 1 + chaos * 1.4;
+  const K = Math.max(1, Math.min(scored.length, Math.round((1 + (100 - effectiveStrength) / 8) * chaosBoost)));
   const pickFrom = scored.slice(0, K);
+
+  if (Math.random() < blunderChance && scored.length > 4) {
+    const tail = scored.slice(-Math.min(6, scored.length));
+    return tail[Math.floor(Math.random() * tail.length)].mv;
+  }
 
   const weights = pickFrom.map((_, i) => Math.exp((K - i) / 2));
   const sum = weights.reduce((a, b) => a + b, 0);
@@ -568,6 +580,124 @@ function formatMove(mv) {
 }
 
 const STORAGE_KEY = "chess-elo-calculator:last5";
+
+const THEMES = [
+  {
+    id: "nebula",
+    name: "Nebula",
+    description: "Cool blues + lavender glow.",
+    base: "#050507",
+    glowTop: "rgba(56,189,248,0.18)",
+    glowBottom: "rgba(167,139,250,0.16)",
+    grid: "rgba(255,255,255,0.12)",
+    boardDark: "#1f2a3a",
+    boardLight: "#27364a",
+    accent: "#7dd3fc",
+    accentSoft: "rgba(125,211,252,0.3)",
+  },
+  {
+    id: "ember",
+    name: "Ember",
+    description: "Warm reds + molten board.",
+    base: "#0b0605",
+    glowTop: "rgba(248,113,113,0.2)",
+    glowBottom: "rgba(251,146,60,0.16)",
+    grid: "rgba(255,255,255,0.1)",
+    boardDark: "#2a1715",
+    boardLight: "#3b2220",
+    accent: "#fb7185",
+    accentSoft: "rgba(251,113,133,0.3)",
+  },
+  {
+    id: "forest",
+    name: "Deep Forest",
+    description: "Emerald calm with mossy tones.",
+    base: "#050a07",
+    glowTop: "rgba(34,197,94,0.18)",
+    glowBottom: "rgba(20,184,166,0.14)",
+    grid: "rgba(255,255,255,0.08)",
+    boardDark: "#1a2b25",
+    boardLight: "#21362f",
+    accent: "#34d399",
+    accentSoft: "rgba(52,211,153,0.3)",
+  },
+  {
+    id: "arcade",
+    name: "Neon Arcade",
+    description: "Electric teal + purple pop.",
+    base: "#060512",
+    glowTop: "rgba(45,212,191,0.2)",
+    glowBottom: "rgba(139,92,246,0.18)",
+    grid: "rgba(255,255,255,0.12)",
+    boardDark: "#1a2238",
+    boardLight: "#233051",
+    accent: "#22d3ee",
+    accentSoft: "rgba(34,211,238,0.3)",
+  },
+];
+
+const BOT_PERSONALITIES = [
+  {
+    id: "strategist",
+    name: "The Strategist",
+    emoji: "🧭",
+    tagline: "Plays clean, steady, and patient.",
+    strengthBias: 6,
+    chaos: 0.2,
+    blunderChance: 0.0,
+    quips: [
+      "Small edges add up.",
+      "Every pawn matters. So does every tempo.",
+      "Let’s keep it tidy.",
+      "Precision > flash.",
+    ],
+  },
+  {
+    id: "trickster",
+    name: "The Trickster",
+    emoji: "🎭",
+    tagline: "Sets traps and gambits all day.",
+    strengthBias: 0,
+    chaos: 0.55,
+    blunderChance: 0.04,
+    quips: [
+      "A trap a day keeps the Elo away.",
+      "Sacrifices are just spicy investments.",
+      "If you blink, you drop a piece.",
+      "Let’s make this messy.",
+    ],
+  },
+  {
+    id: "juggernaut",
+    name: "The Juggernaut",
+    emoji: "🧱",
+    tagline: "Slow squeeze, endgame pressure.",
+    strengthBias: 10,
+    chaos: 0.15,
+    blunderChance: 0.0,
+    quips: [
+      "We grind until something cracks.",
+      "You can’t out-sprint a wall.",
+      "Endgames are my playground.",
+      "Position first, tactics later.",
+    ],
+  },
+  {
+    id: "chaos",
+    name: "The Chaos Gremlin",
+    emoji: "🌀",
+    tagline: "Wild lines, high variance.",
+    strengthBias: -6,
+    chaos: 0.9,
+    blunderChance: 0.08,
+    quips: [
+      "Who needs theory when you have vibes?",
+      "Let’s roll the dice.",
+      "I’m not losing, I’m experimenting.",
+      "Chaos is a ladder.",
+    ],
+  },
+];
 
 // ---- Fun percentile + level (VERY approximate) ----
 // Vibes-based percentiles for UI fun (not official).
@@ -661,6 +791,8 @@ export default function App() {
   const [status, setStatus] = useState("Your move (White)");
   const [botPlays, setBotPlays] = useState("b");
   const [botStrength, setBotStrength] = useState(60);
+  const [botPersonality, setBotPersonality] = useState("strategist");
+  const [themeId, setThemeId] = useState("nebula");
   const [moves, setMoves] = useState([]); // {from,to,promo,side,loss}
   const [result, setResult] = useState(null);
   const [lastElo, setLastElo] = useState(null);
@@ -677,6 +809,11 @@ export default function App() {
   });
 
   const youColor = botPlays === "w" ? "b" : "w";
+  const theme = useMemo(() => THEMES.find((t) => t.id === themeId) || THEMES[0], [themeId]);
+  const personality = useMemo(
+    () => BOT_PERSONALITIES.find((p) => p.id === botPersonality) || BOT_PERSONALITIES[0],
+    [botPersonality],
+  );
 
   // rotate board so YOU are always at the bottom (like chess.com)
   const squares = useMemo(() => {
@@ -704,6 +841,26 @@ export default function App() {
     return { movesPlayed, avgLoss, blunders };
   }, [moves, youColor]);
 
+  const analysis = useMemo(() => {
+    const yourMoves = moves.filter((m) => m.side === youColor);
+    const recent = yourMoves.slice(-5);
+    const recentAvg = recent.length
+      ? Math.round(recent.reduce((a, m) => a + m.loss, 0) / recent.length)
+      : null;
+    let streak = 0;
+    for (let i = yourMoves.length - 1; i >= 0; i--) {
+      if (yourMoves[i].loss < 70) streak += 1;
+      else break;
+    }
+    const accuracy = clamp(Math.round(100 - (yourSummary.avgLoss || 0) / 2), 35, 99);
+    return { recentAvg, streak, accuracy };
+  }, [moves, youColor, yourSummary.avgLoss]);
+
+  const botQuip = useMemo(() => {
+    const idx = moves.length % personality.quips.length;
+    return personality.quips[idx];
+  }, [moves.length, personality]);
+
   const avg5 = useMemo(() => {
     if (!history.length) return null;
     const mean = Math.round(history.reduce((a, h) => a + h.elo, 0) / history.length);
@@ -714,9 +871,9 @@ export default function App() {
   useEffect(() => {
     if (result) return;
     if (turn === botPlays) {
-      setStatus(`Bot thinking… (strength ${botStrength})`);
+      setStatus(`Bot thinking… (${personality.name}, strength ${botStrength})`);
       const t = setTimeout(() => {
-        const mv = pickBotMove(board, turn, botStrength, castle);
+        const mv = pickBotMove(board, turn, botStrength, castle, personality);
         if (!mv) return;
 
         const loss = lossForMove(board, mv, turn, castle);
@@ -738,7 +895,7 @@ export default function App() {
 
       return () => clearTimeout(t);
     }
-  }, [turn, botPlays, botStrength, board, result, castle, youColor]);
+  }, [turn, botPlays, botStrength, board, result, castle, youColor, personality]);
 
   function finishGame(gr, finalBoard, nextTurn, nextCastle) {
     let resText = "Draw";
@@ -849,9 +1006,20 @@ export default function App() {
   return (
     <div className="min-h-screen text-neutral-100">
       {/* Background */}
-      <div className="fixed inset-0 -z-10 bg-neutral-950">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(56,189,248,0.16),transparent_55%),radial-gradient(ellipse_at_bottom,rgba(167,139,250,0.14),transparent_55%)]" />
-        <div className="absolute inset-0 opacity-[0.07] bg-[linear-gradient(to_right,rgba(255,255,255,0.12)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.12)_1px,transparent_1px)] bg-[size:32px_32px]" />
+      <div className="fixed inset-0 -z-10" style={{ backgroundColor: theme.base }}>
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `radial-gradient(ellipse_at_top,${theme.glowTop},transparent_55%),radial-gradient(ellipse_at_bottom,${theme.glowBottom},transparent_55%)`,
+          }}
+        />
+        <div
+          className="absolute inset-0 opacity-[0.07]"
+          style={{
+            backgroundImage: `linear-gradient(to_right,${theme.grid}_1px,transparent_1px),linear-gradient(to_bottom,${theme.grid}_1px,transparent_1px)`,
+            backgroundSize: "32px 32px",
+          }}
+        />
       </div>
 
       <div className="p-5 sm:p-7">
@@ -859,17 +1027,20 @@ export default function App() {
           {/* Main */}
           <div className="lg:col-span-2 space-y-5">
             {/* Header */}
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">Chess Elo Calculator</h1>
                 <p className="text-neutral-300 mt-2 max-w-2xl">
-                  Play vs the bot. We estimate your Elo (fun, not official) based on move quality. Now with castling + a
-                  way nicer UI.
+                  Play vs the bot. We estimate your Elo (fun, not official) based on move quality. Now with themes,
+                  analysis, and bot personalities.
                 </p>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Pill tone="neutral">
                     You: <b>{colorToMoveName(youColor)}</b>
+                  </Pill>
+                  <Pill tone="neutral">
+                    Bot: <b>{personality.name}</b>
                   </Pill>
                   <Pill tone={turnTone}>{result ? "Game finished" : turn === youColor ? "Your move" : "Bot move"}</Pill>
                   {result && <Pill tone={resultTone}>{result.text}</Pill>}
@@ -963,16 +1134,25 @@ export default function App() {
                               "h-[clamp(46px,7vw,72px)] w-[clamp(46px,7vw,72px)]",
                               "grid place-items-center select-none transition",
                               "focus:outline-none",
-                              dark ? "bg-[#1f2a3a]" : "bg-[#27364a]",
                               "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]",
                               "hover:brightness-110",
-                              isSel ? "ring-2 ring-sky-300 z-10" : "",
-                              isMove ? "ring-2 ring-emerald-300/60 z-[5]" : "",
+                              isSel ? "z-10" : "",
+                              isMove ? "z-[5]" : "",
                             ].join(" ")}
+                            style={{
+                              backgroundColor: dark ? theme.boardDark : theme.boardLight,
+                              boxShadow: isSel
+                                ? `0 0 0 2px ${theme.accent}`
+                                : isMove
+                                ? `0 0 0 2px ${theme.accentSoft}`
+                                : undefined,
+                            }}
                             title={sq}
                           >
                             {/* move dot */}
-                            {isMove && !pc && <span className="absolute w-3 h-3 rounded-full bg-emerald-300/70" />}
+                            {isMove && !pc && (
+                              <span className="absolute w-3 h-3 rounded-full" style={{ backgroundColor: theme.accent }} />
+                            )}
 
                             <span
                               className={[
@@ -1050,8 +1230,57 @@ export default function App() {
                     value={botStrength}
                     onChange={(e) => setBotStrength(parseInt(e.target.value, 10))}
                     className="accent-sky-400"
+                    style={{ accentColor: theme.accent }}
                   />
                   <span className="text-sm text-neutral-200 w-10 text-right font-semibold">{botStrength}</span>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4">
+                  <div className="text-xs uppercase tracking-wide text-neutral-400">Bot personality</div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-2xl">{personality.emoji}</span>
+                    <div>
+                      <div className="font-semibold">{personality.name}</div>
+                      <div className="text-xs text-neutral-400">{personality.tagline}</div>
+                    </div>
+                  </div>
+                  <select
+                    value={botPersonality}
+                    onChange={(e) => {
+                      setBotPersonality(e.target.value);
+                      reset();
+                    }}
+                    className="mt-3 w-full bg-neutral-950/60 border border-white/10 rounded-xl px-3 py-2 text-sm"
+                  >
+                    {BOT_PERSONALITIES.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="mt-3 text-sm text-neutral-300">
+                    Bot says: <span className="font-medium text-neutral-100">“{botQuip}”</span>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4">
+                  <div className="text-xs uppercase tracking-wide text-neutral-400">Theme</div>
+                  <div className="mt-2 grid gap-2">
+                    {THEMES.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setThemeId(t.id)}
+                        className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-sm transition ${
+                          themeId === t.id ? "border-white/40 bg-white/10" : "border-white/10 hover:bg-white/5"
+                        }`}
+                      >
+                        <span className="font-medium">{t.name}</span>
+                        <span className="text-xs text-neutral-400">{t.description}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1215,32 +1444,70 @@ export default function App() {
                 )}
               </div>
             </div>
+
+            <CoachFeedback moves={moves} youColor={youColor} result={result} />
           </div>
 
           {/* Sidebar */}
           <div className="lg:col-span-1">
             <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sticky top-6 space-y-4">
-              <h2 className="font-semibold text-lg">How it works</h2>
-              <ol className="text-sm text-neutral-300 space-y-2 list-decimal list-inside">
-                <li>Play vs the bot (quick evaluator).</li>
-                <li>After the game, we measure your move quality (centipawn loss vs best 1-ply).</li>
-                <li>We map that + result into a rough Elo estimate and average your last 5 games.</li>
-              </ol>
+              <h2 className="font-semibold text-lg">Live analysis</h2>
 
-              <div className="p-4 rounded-2xl bg-neutral-950/40 border border-white/10">
-                <div className="text-sm text-neutral-200 font-medium">Next upgrade (big)</div>
-                <div className="text-xs text-neutral-400 mt-1">
-                  Swap the evaluator for real Stockfish (WASM) and your ratings become way more meaningful.
+              <div className="grid gap-3">
+                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-3">
+                  <div className="text-xs text-neutral-400">Accuracy pulse</div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <div className="text-lg font-semibold text-white">{analysis.accuracy}%</div>
+                    <div className="text-xs text-neutral-400">based on avg loss</div>
+                  </div>
+                  <div className="mt-2 h-2 rounded-full bg-white/10 overflow-hidden">
+                    <div className="h-full" style={{ width: `${analysis.accuracy}%`, background: theme.accent }} />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-3">
+                  <div className="text-xs text-neutral-400">Momentum (last 5)</div>
+                  <div className="mt-1 text-lg font-semibold text-white">
+                    {analysis.recentAvg === null ? "--" : `${analysis.recentAvg}cp`}
+                  </div>
+                  <div className="text-xs text-neutral-400 mt-1">
+                    {analysis.recentAvg === null
+                      ? "Play a few moves to unlock trends."
+                      : analysis.recentAvg < yourSummary.avgLoss
+                      ? "Trending up. Keep the pressure!"
+                      : "Steady. Look for one tactical upgrade."}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-3">
+                  <div className="text-xs text-neutral-400">Good-move streak</div>
+                  <div className="mt-1 text-lg font-semibold text-white">{analysis.streak}</div>
+                  <div className="text-xs text-neutral-400 mt-1">
+                    {analysis.streak >= 4
+                      ? "You’re in the zone. Stay calm."
+                      : "String 4 clean moves for a streak bonus."}
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <h3 className="font-semibold">Quick tips</h3>
-                <ul className="mt-2 text-sm text-neutral-300 space-y-1 list-disc list-inside">
-                  <li>Play 5 games at the same strength.</li>
-                  <li>Castling is supported now — king must not pass through check.</li>
-                  <li>If you blunder a queen, the estimate drops hard (as it should).</li>
-                </ul>
+              <div className="p-4 rounded-2xl bg-neutral-950/40 border border-white/10">
+                <div className="text-sm text-neutral-200 font-medium">Elo encouragement</div>
+                <div className="text-xs text-neutral-400 mt-1">
+                  {yourSummary.blunders === 0 && yourSummary.movesPlayed >= 8
+                    ? "No blunders so far. You’re piloting a clean game."
+                    : yourSummary.avgLoss < 70
+                    ? "Strong accuracy. Your next jump is in endgame technique."
+                    : "Focus on one move quality: avoid hanging pieces and you’ll climb fast."}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-neutral-950/40 border border-white/10">
+                <div className="text-sm text-neutral-200 font-medium">How it works</div>
+                <ol className="text-xs text-neutral-400 mt-2 space-y-1 list-decimal list-inside">
+                  <li>Play vs the bot (quick evaluator).</li>
+                  <li>We track centipawn loss vs the best 1-ply move.</li>
+                  <li>That + result maps to a rough Elo estimate.</li>
+                </ol>
               </div>
 
               <div className="text-xs text-neutral-500">
