@@ -1,0 +1,61 @@
+import React from "react";
+
+const features = [
+  {
+    title: "Play vs bot",
+    description: "Challenge a fast, adaptive opponent that keeps the game engaging from move one.",
+  },
+  {
+    title: "Live analysis",
+    description: "Instant feedback on mistakes, tactics, and accuracy as the game unfolds.",
+  },
+  {
+    title: "Bot personality",
+    description: "Pick calm, aggressive, or balanced styles and see how your Elo adjusts.",
+  },
+  {
+    title: "Board themes",
+    description: "Switch visual themes to match your mood without interrupting play.",
+  },
+  {
+    title: "Elo estimate",
+    description: "Get a quick estimate built from move quality, momentum, and results.",
+  },
+  {
+    title: "Accuracy + streaks",
+    description: "Track consistency with streak tracking and accuracy breakdowns.",
+  },
+];
+
+export default function FeaturesSection() {
+  return (
+    <section className="py-16" id="features">
+      <div className="mx-auto w-full max-w-6xl">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">Features</p>
+            <h2 className="mt-4 text-3xl font-semibold text-white sm:text-4xl">Everything you need to learn fast.</h2>
+          </div>
+          <p className="max-w-md text-sm text-slate-300">
+            The right tools to measure improvement without the noise. Built for quick sessions and smart insights.
+          </p>
+        </div>
+
+        <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {features.map((feature) => (
+            <div
+              key={feature.title}
+              className="group rounded-3xl border border-white/10 bg-slate-950/50 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)] transition hover:-translate-y-1 hover:border-white/30"
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-xl text-white">
+                ♟️
+              </div>
+              <h3 className="mt-4 text-lg font-semibold text-white">{feature.title}</h3>
+              <p className="mt-2 text-sm text-slate-300">{feature.description}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
