@@ -42,7 +42,7 @@ export default function App() {
         {path === "/play" ? (
           <PlayPage theme={theme} themeId={themeId} setThemeId={setThemeId} />
         ) : (
-          <LandingPage theme={theme} onNavigate={navigate} />
+          <LandingPage onNavigate={navigate} />
         )}
       </div>
     </div>
