@@ -1,6 +1,6 @@
 import React from "react";
 
-export default function CoachFeedback({ moves, youColor, result }) {
+export default function CoachFeedback({ moves, youColor, result, className = "", title = "Coach says" }) {
   if (!moves.length) return null;
   const yourMoves = moves.filter((m) => m.side === youColor);
   const last = yourMoves[yourMoves.length - 1];
@@ -33,9 +33,18 @@ export default function CoachFeedback({ moves, youColor, result }) {
     tone = "neutral";
   }
 
+  const toneClasses =
+    tone === "bad"
+      ? "border-rose-500/40 bg-rose-900/20"
+      : tone === "warn"
+      ? "border-amber-500/40 bg-amber-900/20"
+      : tone === "good"
+      ? "border-emerald-500/40 bg-emerald-900/20"
+      : "border-neutral-500/20 bg-neutral-900/20";
+
   return (
-    <div className={`p-4 rounded-2xl border mt-4 ${tone === "bad" ? "border-rose-500/40 bg-rose-900/20" : tone === "warn" ? "border-amber-500/40 bg-amber-900/20" : tone === "good" ? "border-emerald-500/40 bg-emerald-900/20" : "border-neutral-500/20 bg-neutral-900/20"}`}>
-      <div className="font-semibold text-lg mb-1">Coach says:</div>
+    <div className={`p-4 rounded-2xl border ${toneClasses} ${className}`.trim()}>
+      <div className="font-semibold text-lg mb-1">{title}:</div>
       <div className="text-sm">{feedback}</div>
     </div>
   );
