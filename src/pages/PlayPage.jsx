@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachFeedback from "../CoachFeedback";
+import { Button } from "../components/ui/button";
 import { BOT_PERSONALITIES, THEMES } from "../data/gameData";
 
 /**
@@ -655,12 +656,12 @@ function buildBadges({ avgLoss, blunders, movesPlayed, result, vs }) {
 function Pill({ children, tone = "neutral" }) {
   const toneCls =
     tone === "good"
-      ? "bg-emerald-500/10 text-emerald-200 border-emerald-500/20"
+      ? "bg-[hsl(var(--success)/0.18)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.4)]"
       : tone === "warn"
-      ? "bg-amber-500/10 text-amber-200 border-amber-500/20"
+      ? "bg-[hsl(var(--warning)/0.18)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.4)]"
       : tone === "bad"
-      ? "bg-rose-500/10 text-rose-200 border-rose-500/20"
-      : "bg-neutral-500/10 text-neutral-200 border-neutral-500/20";
+      ? "bg-[hsl(var(--danger)/0.18)] text-[hsl(var(--danger))] border-[hsl(var(--danger)/0.4)]"
+      : "bg-[hsl(var(--surface-3))] text-muted border-[hsl(var(--border))]";
   return (
     <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs ${toneCls}`}>
       {children}
@@ -884,9 +885,9 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
   const coachContent = moves.length ? (
     <CoachFeedback moves={moves} youColor={youColor} result={result} className="mt-0" title="Coach's comment" />
   ) : (
-    <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4">
-      <div className="text-sm text-neutral-200 font-medium">Coach's comment</div>
-      <div className="text-xs text-neutral-400 mt-2">Make your first move to get real-time coaching feedback.</div>
+    <div className="surface-panel p-4">
+      <div className="text-sm font-medium">Coach's comment</div>
+      <div className="text-xs text-subtle mt-2">Make your first move to get real-time coaching feedback.</div>
     </div>
   );
 
@@ -895,31 +896,33 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
       {/* Main */}
       <div className="lg:col-span-2 space-y-5">
         <div className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4">
-            <div className="text-xs uppercase tracking-wide text-neutral-400">Board theme</div>
+          <div className="surface-panel p-4">
+            <div className="text-xs uppercase tracking-wide text-subtle">Board theme</div>
             <div className="mt-2 grid gap-2">
               {THEMES.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => setThemeId(t.id)}
-                  className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-sm transition ${
-                    themeId === t.id ? "border-white/40 bg-white/10" : "border-white/10 hover:bg-white/5"
+                  className={`flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border px-3 py-2 text-left text-sm transition ${
+                    themeId === t.id
+                      ? "border-[hsl(var(--accent)/0.6)] bg-[hsl(var(--accent)/0.15)]"
+                      : "border-[hsl(var(--border))] hover:bg-[hsl(var(--surface-3))]"
                   }`}
                 >
                   <span className="font-medium">{t.name}</span>
-                  <span className="text-xs text-neutral-400">{t.description}</span>
+                  <span className="text-xs text-subtle">{t.description}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4">
-            <div className="text-xs uppercase tracking-wide text-neutral-400">Bot personality</div>
+          <div className="surface-panel p-4">
+            <div className="text-xs uppercase tracking-wide text-subtle">Bot personality</div>
             <div className="mt-2 flex items-center gap-2">
               <span className="text-2xl">{personality.emoji}</span>
               <div>
                 <div className="font-semibold">{personality.name}</div>
-                <div className="text-xs text-neutral-400">{personality.tagline}</div>
+                <div className="text-xs text-subtle">{personality.tagline}</div>
               </div>
             </div>
             <select
@@ -928,7 +931,7 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                 setBotPersonality(e.target.value);
                 reset();
               }}
-              className="mt-3 w-full bg-neutral-950/60 border border-white/10 rounded-xl px-3 py-2 text-sm"
+              className="mt-3 app-input text-sm"
             >
               {BOT_PERSONALITIES.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -936,8 +939,8 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                 </option>
               ))}
             </select>
-            <div className="mt-3 text-sm text-neutral-300">
-              Bot says: <span className="font-medium text-neutral-100">“{botQuip}”</span>
+            <div className="mt-3 text-sm text-muted">
+              Bot says: <span className="font-medium text-white">“{botQuip}”</span>
             </div>
           </div>
         </div>
@@ -963,44 +966,38 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
           </div>
 
           <div className="flex gap-2">
-            <button
-              onClick={reset}
-              className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 transition"
-            >
+            <Button variant="secondary" size="sm" onClick={reset}>
               New game
-            </button>
-            <button
-              onClick={clearHistory}
-              className="px-4 py-2 rounded-xl bg-neutral-900/40 hover:bg-neutral-900/60 border border-white/10 transition"
-            >
+            </Button>
+            <Button variant="outline" size="sm" onClick={clearHistory}>
               Clear last 5
-            </button>
+            </Button>
           </div>
         </div>
 
         {/* Board card */}
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] shadow-[0_0_0_1px_rgba(255,255,255,0.04)] overflow-hidden">
-          <div className="p-4 sm:p-5 flex items-center justify-between gap-3 border-b border-white/10">
-            <div className="text-sm text-neutral-200">
+        <div className="surface-card overflow-hidden">
+          <div className="p-4 sm:p-5 flex items-center justify-between gap-3 border-b border-[hsl(var(--border))]">
+            <div className="text-sm text-muted">
               <span className="font-medium">Status:</span> {status}
             </div>
 
             <div className="flex items-center gap-3 text-sm">
-              <span className="text-neutral-300">Avg loss</span>
+              <span className="text-muted">Avg loss</span>
               <span className="font-semibold">{yourSummary.avgLoss}cp</span>
-              <span className="text-neutral-500">·</span>
-              <span className="text-neutral-300">Blunders</span>
+              <span className="text-subtle">·</span>
+              <span className="text-muted">Blunders</span>
               <span className="font-semibold">{yourSummary.blunders}</span>
             </div>
           </div>
 
           <div className="p-4 sm:p-6">
             {/* Board frame */}
-            <div className="w-fit mx-auto rounded-3xl p-3 bg-neutral-950/40 border border-white/10 shadow-[0_20px_80px_rgba(0,0,0,0.6)]">
+            <div className="w-fit mx-auto rounded-[var(--radius-lg)] p-3 bg-[hsl(var(--surface-2))] border border-[hsl(var(--border))] shadow-[var(--shadow-soft)]">
                   {/* file labels top */}
                   <div className="grid grid-cols-[18px_1fr_18px] items-center mb-2">
                     <div />
-                    <div className="grid grid-cols-8 text-[10px] text-neutral-400 px-1">
+                    <div className="grid grid-cols-8 text-[10px] text-subtle px-1">
                       {(youColor === "w" ? FILES : FILES.split("").reverse().join("")).split("").map((ch) => (
                         <div key={ch} className="text-center">
                           {ch}
@@ -1012,7 +1009,7 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
 
                   <div className="grid grid-cols-[18px_auto_18px] items-center gap-2">
                     {/* rank labels left */}
-                    <div className="grid grid-rows-8 text-[10px] text-neutral-400">
+                    <div className="grid grid-rows-8 text-[10px] text-subtle">
                       {(youColor === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8]).map((n) => (
                         <div key={n} className="h-[clamp(46px,7vw,72px)] flex items-center justify-center">
                           {n}
@@ -1081,7 +1078,7 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                     </div>
 
                     {/* rank labels right */}
-                    <div className="grid grid-rows-8 text-[10px] text-neutral-400">
+                    <div className="grid grid-rows-8 text-[10px] text-subtle">
                       {(youColor === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8]).map((n) => (
                         <div key={n} className="h-[clamp(46px,7vw,72px)] flex items-center justify-center">
                           {n}
@@ -1093,7 +1090,7 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                   {/* file labels bottom */}
                   <div className="grid grid-cols-[18px_1fr_18px] items-center mt-2">
                     <div />
-                    <div className="grid grid-cols-8 text-[10px] text-neutral-400 px-1">
+                    <div className="grid grid-cols-8 text-[10px] text-subtle px-1">
                       {(youColor === "w" ? FILES : FILES.split("").reverse().join("")).split("").map((ch) => (
                         <div key={ch} className="text-center">
                           {ch}
@@ -1107,20 +1104,25 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
         </div>
 
         {/* Moves */}
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+        <div className="surface-panel p-5">
           <h2 className="font-semibold text-lg">Move list</h2>
           <div className="mt-3 max-h-64 overflow-auto text-sm pr-1">
             {moves.length === 0 ? (
-              <div className="text-neutral-400">No moves yet.</div>
+              <div className="text-subtle">No moves yet.</div>
             ) : (
               <ol className="space-y-1.5">
                 {moves.map((m, idx) => {
-                  const tone = m.loss > 300 ? "text-rose-300" : m.loss > 120 ? "text-amber-300" : "text-emerald-300";
+                  const tone =
+                    m.loss > 300
+                      ? "text-[hsl(var(--danger))]"
+                      : m.loss > 120
+                      ? "text-[hsl(var(--warning))]"
+                      : "text-[hsl(var(--success))]";
                   return (
                     <li key={idx} className="flex items-center justify-between gap-2">
-                      <span className="text-neutral-300">
+                      <span className="text-muted">
                         {idx + 1}. {m.side === "w" ? "W" : "B"}{" "}
-                        <span className="font-medium text-neutral-100">{formatMove(m)}</span>
+                        <span className="font-medium text-white">{formatMove(m)}</span>
                       </span>
                       <span className={`text-xs ${tone}`}>loss {Math.round(m.loss)}cp</span>
                     </li>
@@ -1132,28 +1134,28 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
         </div>
 
         {/* Bottom controls */}
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 space-y-5">
+        <div className="surface-card p-5 space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="text-sm text-neutral-200">
+            <div className="text-sm text-muted">
               <div className="font-medium">Bot controls</div>
-              <div className="text-neutral-400 mt-1">Bot strength uses a placeholder slider until Stockfish arrives.</div>
+              <div className="text-subtle mt-1">Bot strength uses a placeholder slider until Stockfish arrives.</div>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <label className="text-sm text-neutral-300">Bot plays</label>
+              <label className="text-sm text-muted">Bot plays</label>
               <select
                 value={botPlays}
                 onChange={(e) => {
                   setBotPlays(e.target.value);
                   reset();
                 }}
-                className="bg-neutral-950/60 border border-white/10 rounded-xl px-3 py-2 text-sm"
+                className="app-input text-sm"
               >
                 <option value="b">Black</option>
                 <option value="w">White</option>
               </select>
 
-              <label className="text-sm text-neutral-300">Strength (placeholder)</label>
+              <label className="text-sm text-muted">Strength (placeholder)</label>
               <input
                 type="range"
                 min={10}
@@ -1161,19 +1163,19 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                 step={5}
                 value={botStrength}
                 onChange={(e) => setBotStrength(parseInt(e.target.value, 10))}
-                className="accent-sky-400"
+                className="accent-[hsl(var(--accent))]"
                 style={{ accentColor: theme.accent }}
               />
-              <span className="text-sm text-neutral-200 w-10 text-right font-semibold">{botStrength}</span>
+              <span className="text-sm text-muted w-10 text-right font-semibold">{botStrength}</span>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4">
+          <div className="surface-panel p-4">
             <h2 className="font-semibold text-lg">Elo estimate</h2>
 
             <div className="mt-3">
               {!lastElo ? (
-                <div className="text-neutral-400 text-sm">Finish a game to get an estimate.</div>
+                <div className="text-subtle text-sm">Finish a game to get an estimate.</div>
               ) : (
                 (() => {
                   const betterThan = approxPercentileBetterThan(lastElo.elo);
@@ -1191,7 +1193,7 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                     <div className="space-y-4">
                       <div className="flex flex-wrap items-end justify-between gap-3">
                         <div>
-                          <div className="text-xs uppercase tracking-wide text-neutral-400">Estimated Elo</div>
+                          <div className="text-xs uppercase tracking-wide text-subtle">Estimated Elo</div>
                           <div className="text-6xl font-semibold tracking-tight leading-none">{lastElo.elo}</div>
                         </div>
 
@@ -1203,48 +1205,48 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                         </Pill>
                       </div>
 
-                      <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4">
+                      <div className="surface-panel p-4">
                         <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm text-neutral-200 font-medium">
+                          <div className="text-sm text-muted font-medium">
                             You’re better than{" "}
                             <span className="font-semibold text-white">{betterThan.toFixed(1)}%</span> of players
                           </div>
-                          <div className="text-sm text-neutral-300">
+                          <div className="text-sm text-muted">
                             Top <span className="font-semibold text-white">{topPct.toFixed(1)}%</span>
                           </div>
                         </div>
 
-                        <div className="mt-3 h-2 rounded-full bg-white/10 overflow-hidden">
-                          <div className="h-full bg-white/60" style={{ width: `${clamp(betterThan, 1, 99.7)}%` }} />
+                        <div className="mt-3 h-2 rounded-full bg-[hsl(var(--surface-3))] overflow-hidden">
+                          <div className="h-full bg-[hsl(var(--accent))]" style={{ width: `${clamp(betterThan, 1, 99.7)}%` }} />
                         </div>
 
-                        <div className="mt-2 text-xs text-neutral-400">
+                        <div className="mt-2 text-xs text-subtle">
                           Percentile is a rough approximation for fun (not official).
                         </div>
                       </div>
 
-                      <div className="text-sm text-neutral-200">
-                        <span className="text-neutral-400">Coach:</span>{" "}
+                      <div className="text-sm text-muted">
+                        <span className="text-subtle">Coach:</span>{" "}
                         <span className="font-medium">
                           {egoLine({ avgLoss: lastElo.avgLoss, blunders: lastElo.blunders, result: result?.yours })}
                         </span>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
-                        <div className="rounded-2xl border border-white/10 bg-neutral-950/30 p-3">
-                          <div className="text-xs text-neutral-400">Confidence</div>
+                        <div className="surface-subtle p-3">
+                          <div className="text-xs text-subtle">Confidence</div>
                           <div className="text-lg font-semibold text-white">{lastElo.conf}%</div>
                         </div>
-                        <div className="rounded-2xl border border-white/10 bg-neutral-950/30 p-3">
-                          <div className="text-xs text-neutral-400">Avg centipawn loss</div>
+                        <div className="surface-subtle p-3">
+                          <div className="text-xs text-subtle">Avg centipawn loss</div>
                           <div className="text-lg font-semibold text-white">{lastElo.avgLoss}cp</div>
                         </div>
-                        <div className="rounded-2xl border border-white/10 bg-neutral-950/30 p-3">
-                          <div className="text-xs text-neutral-400">Blunders</div>
+                        <div className="surface-subtle p-3">
+                          <div className="text-xs text-subtle">Blunders</div>
                           <div className="text-lg font-semibold text-white">{lastElo.blunders}</div>
                         </div>
-                        <div className="rounded-2xl border border-white/10 bg-neutral-950/30 p-3">
-                          <div className="text-xs text-neutral-400">Vs bot strength</div>
+                        <div className="surface-subtle p-3">
+                          <div className="text-xs text-subtle">Vs bot strength</div>
                           <div className="text-lg font-semibold text-white">{lastElo.vs}</div>
                         </div>
                       </div>
@@ -1259,7 +1261,7 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                         </div>
                       )}
 
-                      <div className="text-xs text-neutral-500">
+                      <div className="text-xs text-subtle">
                         Uses a quick 1-ply benchmark (not Stockfish). Fun estimate, not official.
                       </div>
                     </div>
@@ -1270,22 +1272,22 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
 
             <h3 className="font-semibold mt-6">Last 5 games</h3>
             {history.length === 0 ? (
-              <div className="text-neutral-400 text-sm mt-2">No games saved yet.</div>
+              <div className="text-subtle text-sm mt-2">No games saved yet.</div>
             ) : (
               <div className="mt-2 space-y-2">
                 {avg5 && (
-                  <div className="text-sm text-neutral-200">
+                  <div className="text-sm text-muted">
                     Average: <span className="font-semibold">{avg5.mean}</span>{" "}
-                    <span className="text-neutral-400">(avg conf {avg5.conf}%, n={avg5.n})</span>
+                    <span className="text-subtle">(avg conf {avg5.conf}%, n={avg5.n})</span>
                   </div>
                 )}
-                <ul className="text-sm text-neutral-300 space-y-1">
+                <ul className="text-sm text-muted space-y-1">
                   {history.map((h) => (
                     <li key={h.ts} className="flex items-center justify-between">
-                      <span className="text-neutral-400">
+                      <span className="text-subtle">
                         {new Date(h.ts).toLocaleString()} · {h.result.toUpperCase()} vs {h.botStrength}
                       </span>
-                      <span className="font-semibold text-neutral-100">{h.elo}</span>
+                      <span className="font-semibold text-white">{h.elo}</span>
                     </li>
                   ))}
                 </ul>
@@ -1297,33 +1299,33 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
 
       {/* Sidebar */}
       <div className="lg:col-span-1">
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sticky top-6 space-y-4">
+        <div className="surface-card p-5 sticky top-6 space-y-4">
           <h2 className="font-semibold text-lg">Live analysis</h2>
 
           {coachContent}
 
           <div className="grid gap-3">
-            <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-3">
-              <div className="text-xs text-neutral-400">Accuracy pulse</div>
+            <div className="surface-panel p-3">
+              <div className="text-xs text-subtle">Accuracy pulse</div>
               <div className="mt-1 flex items-center justify-between">
                 <div className="text-lg font-semibold text-white">{analysis.accuracy}%</div>
-                <div className="text-xs text-neutral-400">based on avg loss</div>
+                <div className="text-xs text-subtle">based on avg loss</div>
               </div>
-              <div className="mt-2 h-2 rounded-full bg-white/10 overflow-hidden">
+              <div className="mt-2 h-2 rounded-full bg-[hsl(var(--surface-3))] overflow-hidden">
                 <div className="h-full" style={{ width: `${analysis.accuracy}%`, background: theme.accent }} />
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-3">
-              <div className="text-xs text-neutral-400">Good-move streak</div>
+            <div className="surface-panel p-3">
+              <div className="text-xs text-subtle">Good-move streak</div>
               <div className="mt-1 text-lg font-semibold text-white">{analysis.streak}</div>
-              <div className="text-xs text-neutral-400 mt-1">
+              <div className="text-xs text-subtle mt-1">
                 {analysis.streak >= 4 ? "You’re in the zone. Stay calm." : "String 4 clean moves for a streak bonus."}
               </div>
             </div>
           </div>
 
-          <div className="text-xs text-neutral-500">
+          <div className="text-xs text-subtle">
             Disclaimer: entertainment estimate. Real Elo requires rated opponents + many games.
           </div>
         </div>

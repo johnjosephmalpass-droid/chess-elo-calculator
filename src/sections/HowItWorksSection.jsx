@@ -19,18 +19,18 @@ export default function HowItWorksSection() {
   return (
     <section className="py-16" id="how-it-works">
       <div className="mx-auto w-full max-w-6xl">
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-10">
-          <p className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">How it works</p>
-          <h2 className="mt-4 text-3xl font-semibold text-white sm:text-4xl">Three steps to your estimate.</h2>
+        <div className="surface-card p-10">
+          <p className="text-xs font-semibold uppercase tracking-[0.4em] text-muted">How it works</p>
+          <h2 className="mt-4 text-3xl font-semibold sm:text-4xl">Three steps to your estimate.</h2>
 
           <div className="mt-10 grid gap-6 md:grid-cols-3">
             {steps.map((step, index) => (
-              <div key={step.title} className="rounded-2xl border border-white/10 bg-slate-950/60 p-6">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-sm font-semibold text-white">
+              <div key={step.title} className="surface-panel p-6">
+                <div className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-sm)] bg-[hsl(var(--surface-3))] text-sm font-semibold">
                   {index + 1}
                 </div>
-                <h3 className="mt-4 text-lg font-semibold text-white">{step.title}</h3>
-                <p className="mt-2 text-sm text-slate-300">{step.description}</p>
+                <h3 className="mt-4 text-lg font-semibold">{step.title}</h3>
+                <p className="mt-2 text-sm text-muted">{step.description}</p>
               </div>
             ))}
           </div>

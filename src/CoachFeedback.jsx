@@ -35,17 +35,17 @@ export default function CoachFeedback({ moves, youColor, result, className = "",
 
   const toneClasses =
     tone === "bad"
-      ? "border-rose-500/40 bg-rose-900/20"
+      ? "border-[hsl(var(--danger)/0.5)] bg-[hsl(var(--danger)/0.15)]"
       : tone === "warn"
-      ? "border-amber-500/40 bg-amber-900/20"
+      ? "border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.15)]"
       : tone === "good"
-      ? "border-emerald-500/40 bg-emerald-900/20"
-      : "border-neutral-500/20 bg-neutral-900/20";
+      ? "border-[hsl(var(--success)/0.5)] bg-[hsl(var(--success)/0.15)]"
+      : "border-[hsl(var(--border))] bg-[hsl(var(--surface-3))]";
 
   return (
-    <div className={`p-4 rounded-2xl border ${toneClasses} ${className}`.trim()}>
+    <div className={`p-4 rounded-[var(--radius-md)] border ${toneClasses} ${className}`.trim()}>
       <div className="font-semibold text-lg mb-1">{title}:</div>
-      <div className="text-sm">{feedback}</div>
+      <div className="text-sm text-muted">{feedback}</div>
     </div>
   );
 }

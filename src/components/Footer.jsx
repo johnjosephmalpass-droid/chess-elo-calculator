@@ -1,14 +1,15 @@
 import React from "react";
+import { buttonVariants } from "./ui/button";
 
 export default function Footer({ onNavigate }) {
   return (
-    <footer className="border-t border-white/10 bg-slate-950/60 px-6 py-10">
+    <footer className="border-t border-[hsl(var(--border))] bg-[hsl(var(--surface))] px-6 py-10">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10">
+          <span className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-sm)] bg-[hsl(var(--surface-3))]">
             <svg
               viewBox="0 0 24 24"
-              className="h-5 w-5 text-white"
+              className="h-5 w-5"
               fill="currentColor"
               aria-hidden="true"
             >
@@ -16,34 +17,28 @@ export default function Footer({ onNavigate }) {
             </svg>
           </span>
           <div>
-            <p className="text-sm font-semibold text-white">Chess Elo Calculator</p>
-            <p className="text-xs text-slate-400">Play, learn, and get your estimate in minutes.</p>
+            <p className="text-sm font-semibold">Chess Elo Calculator</p>
+            <p className="text-xs text-subtle">Play, learn, and get your estimate in minutes.</p>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+        <div className="flex flex-wrap gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-subtle">
           <button
             type="button"
             onClick={() => onNavigate("/play")}
-            className="transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+            className={buttonVariants({ variant: "ghost", size: "sm" })}
           >
             Play
           </button>
-          <a
-            href="#"
-            className="transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
-          >
+          <a href="#" className={buttonVariants({ variant: "ghost", size: "sm" })}>
             GitHub
           </a>
-          <a
-            href="#"
-            className="transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
-          >
+          <a href="#" className={buttonVariants({ variant: "ghost", size: "sm" })}>
             Contact
           </a>
         </div>
       </div>
-      <div className="mx-auto mt-8 w-full max-w-6xl text-xs text-slate-500">
+      <div className="mx-auto mt-8 w-full max-w-6xl text-xs text-subtle">
         © {new Date().getFullYear()} Chess Elo Calculator. All rights reserved.
       </div>
     </footer>

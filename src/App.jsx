@@ -21,7 +21,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen text-neutral-100">
+    <div className="min-h-screen text-[hsl(var(--text))]">
       <div className="fixed inset-0 -z-10" style={{ backgroundColor: theme.base }}>
         <div
           className="absolute inset-0"
