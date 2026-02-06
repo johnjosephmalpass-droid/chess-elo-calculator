@@ -58,7 +58,7 @@ export default function FaqSection() {
               <Card key={faq.question} className="p-0">
                 <button
                   type="button"
-                  className="app-button app-button--secondary flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
+                  className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
                   onClick={() => setOpenIndex(isOpen ? -1 : index)}
                   aria-expanded={isOpen}
                 >
