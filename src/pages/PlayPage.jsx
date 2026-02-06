@@ -882,6 +882,13 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
 
   const resultTone = result?.yours === "win" ? "good" : result?.yours === "loss" ? "bad" : "neutral";
 
+  const toneClasses = {
+    good: "text-[hsl(var(--success))]",
+    warn: "text-[hsl(var(--warning))]",
+    bad: "text-[hsl(var(--danger))]",
+    neutral: "text-muted",
+  };
+
   const coachContent = moves.length ? (
     <CoachFeedback moves={moves} youColor={youColor} result={result} className="mt-0" title="Coach's comment" />
   ) : (
@@ -889,6 +896,195 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
       <div className="text-sm font-medium">Coach's comment</div>
       <div className="text-xs text-subtle mt-2">Make your first move to get real-time coaching feedback.</div>
     </div>
+  );
+
+  const moveListBody = (
+    <div className="mt-3 max-h-64 overflow-auto text-sm pr-1">
+      {moves.length === 0 ? (
+        <div className="text-subtle">No moves yet.</div>
+      ) : (
+        <ol className="space-y-1.5">
+          {moves.map((m, idx) => {
+            const tone =
+              m.loss > 300
+                ? "text-[hsl(var(--danger))]"
+                : m.loss > 120
+                ? "text-[hsl(var(--warning))]"
+                : "text-[hsl(var(--success))]";
+            return (
+              <li key={idx} className="flex items-center justify-between gap-2">
+                <span className="text-muted">
+                  {idx + 1}. {m.side === "w" ? "W" : "B"} <span className="font-medium text-white">{formatMove(m)}</span>
+                </span>
+                <span className={`text-xs ${tone}`}>loss {Math.round(m.loss)}cp</span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+
+  const botControlsBody = (
+    <>
+      <div className="text-sm text-muted">
+        <div className="text-subtle mt-1">Adjust the bot strength and side before starting a new game.</div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="text-sm text-muted">Bot plays</label>
+        <select
+          value={botPlays}
+          onChange={(e) => {
+            setBotPlays(e.target.value);
+            reset();
+          }}
+          className="app-input text-sm"
+        >
+          <option value="b">Black</option>
+          <option value="w">White</option>
+        </select>
+
+        <label className="text-sm text-muted">Strength</label>
+        <input
+          type="range"
+          min={10}
+          max={95}
+          step={5}
+          value={botStrength}
+          onChange={(e) => setBotStrength(parseInt(e.target.value, 10))}
+          className="accent-[hsl(var(--accent))]"
+          style={{ accentColor: theme.accent }}
+        />
+        <span className="text-sm text-muted w-10 text-right font-semibold">{botStrength}</span>
+      </div>
+    </>
+  );
+
+  const eloEstimateBody = (
+    <div className="mt-3">
+      {!lastElo ? (
+        <div className="text-subtle text-sm">Finish a game to get an estimate.</div>
+      ) : (
+        (() => {
+          const betterThan = approxPercentileBetterThan(lastElo.elo);
+          const topPct = Math.max(0.1, 100 - betterThan);
+          const lvl = chessLevel(lastElo.elo);
+          const badges = buildBadges({
+            avgLoss: lastElo.avgLoss,
+            blunders: lastElo.blunders,
+            movesPlayed: lastElo.movesPlayed,
+            result: result?.yours,
+            vs: lastElo.vs,
+          });
+
+          return (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-subtle">Estimated Elo</div>
+                  <div className="text-6xl font-semibold tracking-tight leading-none">{lastElo.elo}</div>
+                </div>
+
+                <Pill tone={lvl.tone}>
+                  <span className="text-base">{lvl.emoji}</span>
+                  <span>
+                    Level: <b>{lvl.name}</b>
+                  </span>
+                </Pill>
+              </div>
+
+              <div className="surface-panel p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm text-muted font-medium">
+                    You’re better than <span className="font-semibold text-white">{betterThan.toFixed(1)}%</span> of
+                    players
+                  </div>
+                  <div className="text-sm text-muted">
+                    Top <span className="font-semibold text-white">{topPct.toFixed(1)}%</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 h-2 rounded-full bg-[hsl(var(--surface-3))] overflow-hidden">
+                  <div className="h-full bg-[hsl(var(--accent))]" style={{ width: `${clamp(betterThan, 1, 99.7)}%` }} />
+                </div>
+
+                <div className="mt-2 text-xs text-subtle">Percentile is a rough approximation for fun (not official).</div>
+              </div>
+
+              <div className="text-sm text-muted">
+                <span className="text-subtle">Coach:</span>{" "}
+                <span className="font-medium">
+                  {egoLine({ avgLoss: lastElo.avgLoss, blunders: lastElo.blunders, result: result?.yours })}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="surface-subtle p-3">
+                  <div className="text-xs text-subtle">Confidence</div>
+                  <div className="text-lg font-semibold text-white">{lastElo.conf}%</div>
+                </div>
+                <div className="surface-subtle p-3">
+                  <div className="text-xs text-subtle">Avg centipawn loss</div>
+                  <div className="text-lg font-semibold text-white">{lastElo.avgLoss}cp</div>
+                </div>
+                <div className="surface-subtle p-3">
+                  <div className="text-xs text-subtle">Blunders</div>
+                  <div className="text-lg font-semibold text-white">{lastElo.blunders}</div>
+                </div>
+                <div className="surface-subtle p-3">
+                  <div className="text-xs text-subtle">Vs bot strength</div>
+                  <div className="text-lg font-semibold text-white">{lastElo.vs}</div>
+                </div>
+              </div>
+
+              {badges.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {badges.map((b, i) => (
+                    <Pill key={i} tone={b.tone}>
+                      <span>{b.emoji}</span> {b.label}
+                    </Pill>
+                  ))}
+                </div>
+              )}
+
+              <div className="text-xs text-subtle">Uses a quick 1-ply benchmark (not Stockfish). Fun estimate, not official.</div>
+            </div>
+          );
+        })()
+      )}
+    </div>
+  );
+
+  const liveAnalysisBody = (
+    <>
+      {coachContent}
+
+      <div className="grid gap-3">
+        <div className="surface-panel p-3">
+          <div className="text-xs text-subtle">Accuracy pulse</div>
+          <div className="mt-1 flex items-center justify-between">
+            <div className="text-lg font-semibold text-white">{analysis.accuracy}%</div>
+            <div className="text-xs text-subtle">based on avg loss</div>
+          </div>
+          <div className="mt-2 h-2 rounded-full bg-[hsl(var(--surface-3))] overflow-hidden">
+            <div className="h-full" style={{ width: `${analysis.accuracy}%`, background: theme.accent }} />
+          </div>
+        </div>
+
+        <div className="surface-panel p-3">
+          <div className="text-xs text-subtle">Good-move streak</div>
+          <div className="mt-1 text-lg font-semibold text-white">{analysis.streak}</div>
+          <div className="text-xs text-subtle mt-1">
+            {analysis.streak >= 4 ? "You’re in the zone. Stay calm." : "String 4 clean moves for a streak bonus."}
+          </div>
+        </div>
+      </div>
+
+      <div className="text-xs text-subtle">
+        Disclaimer: entertainment estimate. Real Elo requires rated opponents + many games.
+      </div>
+    </>
   );
 
   return (
@@ -945,23 +1141,42 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <Pill tone="neutral">
-              You: <b>{colorToMoveName(youColor)}</b>
-            </Pill>
-            <Pill tone="neutral">
-              Bot: <b>{personality.name}</b>
-            </Pill>
-            <Pill tone={turnTone}>{result ? "Game finished" : turn === youColor ? "Your move" : "Bot move"}</Pill>
-            {result && <Pill tone={resultTone}>{result.text}</Pill>}
+        <div className="surface-panel px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-subtle">You</span>
+              <span className="font-semibold text-white">{colorToMoveName(youColor)}</span>
+            </div>
+            <span className="text-subtle">•</span>
+            <div className="flex items-center gap-2">
+              <span className="text-subtle">Bot</span>
+              <span className="font-semibold text-white">{personality.name}</span>
+            </div>
+            <span className="text-subtle">•</span>
+            <div className="flex items-center gap-2">
+              <span className="text-subtle">Turn</span>
+              <span className={`font-semibold ${toneClasses[turnTone]}`}>
+                {result ? "Game finished" : turn === youColor ? "Your move" : "Bot move"}
+              </span>
+            </div>
+            {result && (
+              <>
+                <span className="text-subtle">•</span>
+                <span className={`font-semibold ${toneClasses[resultTone]}`}>{result.text}</span>
+              </>
+            )}
             {!result && (
-              <Pill tone="neutral">
-                Castling:{" "}
-                {(youColor === "w" ? castle.wK || castle.wQ : castle.bK || castle.bQ)
-                  ? "available (if legal)"
-                  : "gone"}
-              </Pill>
+              <>
+                <span className="text-subtle">•</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-subtle">Castling</span>
+                  <span className="font-semibold text-white">
+                    {(youColor === "w" ? castle.wK || castle.wQ : castle.bK || castle.bQ)
+                      ? "available"
+                      : "gone"}
+                  </span>
+                </div>
+              </>
             )}
           </div>
 
@@ -1011,7 +1226,7 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                     {/* rank labels left */}
                     <div className="grid grid-rows-8 text-[10px] text-subtle">
                       {(youColor === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8]).map((n) => (
-                        <div key={n} className="h-[clamp(46px,7vw,72px)] flex items-center justify-center">
+                        <div key={n} className="h-[clamp(50px,7.6vw,78px)] flex items-center justify-center">
                           {n}
                         </div>
                       ))}
@@ -1035,7 +1250,7 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                             onClick={() => handleSquareClick(sq)}
                             className={[
                               "relative",
-                              "h-[clamp(46px,7vw,72px)] w-[clamp(46px,7vw,72px)]",
+                              "h-[clamp(50px,7.6vw,78px)] w-[clamp(50px,7.6vw,78px)]",
                               "grid place-items-center select-none transition",
                               "focus:outline-none",
                               "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]",
@@ -1061,7 +1276,7 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                             <span
                               className={[
                                 "leading-none",
-                                "text-[clamp(30px,4.6vw,54px)]",
+                                "text-[clamp(32px,4.9vw,58px)]",
                                 "font-black",
                                 "transition-transform duration-75",
                                 isSel ? "scale-[1.06]" : "",
@@ -1080,7 +1295,7 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                     {/* rank labels right */}
                     <div className="grid grid-rows-8 text-[10px] text-subtle">
                       {(youColor === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8]).map((n) => (
-                        <div key={n} className="h-[clamp(46px,7vw,72px)] flex items-center justify-center">
+                        <div key={n} className="h-[clamp(50px,7.6vw,78px)] flex items-center justify-center">
                           {n}
                         </div>
                       ))}
@@ -1104,171 +1319,25 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
         </div>
 
         {/* Moves */}
-        <div className="surface-panel p-5">
+        <div className="hidden lg:block surface-panel p-5">
           <h2 className="font-semibold text-lg">Move list</h2>
-          <div className="mt-3 max-h-64 overflow-auto text-sm pr-1">
-            {moves.length === 0 ? (
-              <div className="text-subtle">No moves yet.</div>
-            ) : (
-              <ol className="space-y-1.5">
-                {moves.map((m, idx) => {
-                  const tone =
-                    m.loss > 300
-                      ? "text-[hsl(var(--danger))]"
-                      : m.loss > 120
-                      ? "text-[hsl(var(--warning))]"
-                      : "text-[hsl(var(--success))]";
-                  return (
-                    <li key={idx} className="flex items-center justify-between gap-2">
-                      <span className="text-muted">
-                        {idx + 1}. {m.side === "w" ? "W" : "B"}{" "}
-                        <span className="font-medium text-white">{formatMove(m)}</span>
-                      </span>
-                      <span className={`text-xs ${tone}`}>loss {Math.round(m.loss)}cp</span>
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </div>
+          {moveListBody}
         </div>
+        <details className="lg:hidden surface-panel p-0 overflow-hidden">
+          <summary className="px-5 py-3 text-sm font-semibold cursor-pointer list-none">Move list</summary>
+          <div className="px-5 pb-5">{moveListBody}</div>
+        </details>
 
         {/* Bottom controls */}
-        <div className="surface-card p-5 space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="text-sm text-muted">
-              <div className="font-medium">Bot controls</div>
-              <div className="text-subtle mt-1">Bot strength uses a placeholder slider until Stockfish arrives.</div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="text-sm text-muted">Bot plays</label>
-              <select
-                value={botPlays}
-                onChange={(e) => {
-                  setBotPlays(e.target.value);
-                  reset();
-                }}
-                className="app-input text-sm"
-              >
-                <option value="b">Black</option>
-                <option value="w">White</option>
-              </select>
-
-              <label className="text-sm text-muted">Strength (placeholder)</label>
-              <input
-                type="range"
-                min={10}
-                max={95}
-                step={5}
-                value={botStrength}
-                onChange={(e) => setBotStrength(parseInt(e.target.value, 10))}
-                className="accent-[hsl(var(--accent))]"
-                style={{ accentColor: theme.accent }}
-              />
-              <span className="text-sm text-muted w-10 text-right font-semibold">{botStrength}</span>
-            </div>
+        <div className="hidden lg:grid gap-5">
+          <div className="surface-card p-5 space-y-4">
+            <h2 className="font-semibold text-lg">Bot controls</h2>
+            {botControlsBody}
           </div>
 
           <div className="surface-panel p-4">
             <h2 className="font-semibold text-lg">Elo estimate</h2>
-
-            <div className="mt-3">
-              {!lastElo ? (
-                <div className="text-subtle text-sm">Finish a game to get an estimate.</div>
-              ) : (
-                (() => {
-                  const betterThan = approxPercentileBetterThan(lastElo.elo);
-                  const topPct = Math.max(0.1, 100 - betterThan);
-                  const lvl = chessLevel(lastElo.elo);
-                  const badges = buildBadges({
-                    avgLoss: lastElo.avgLoss,
-                    blunders: lastElo.blunders,
-                    movesPlayed: lastElo.movesPlayed,
-                    result: result?.yours,
-                    vs: lastElo.vs,
-                  });
-
-                  return (
-                    <div className="space-y-4">
-                      <div className="flex flex-wrap items-end justify-between gap-3">
-                        <div>
-                          <div className="text-xs uppercase tracking-wide text-subtle">Estimated Elo</div>
-                          <div className="text-6xl font-semibold tracking-tight leading-none">{lastElo.elo}</div>
-                        </div>
-
-                        <Pill tone={lvl.tone}>
-                          <span className="text-base">{lvl.emoji}</span>
-                          <span>
-                            Level: <b>{lvl.name}</b>
-                          </span>
-                        </Pill>
-                      </div>
-
-                      <div className="surface-panel p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm text-muted font-medium">
-                            You’re better than{" "}
-                            <span className="font-semibold text-white">{betterThan.toFixed(1)}%</span> of players
-                          </div>
-                          <div className="text-sm text-muted">
-                            Top <span className="font-semibold text-white">{topPct.toFixed(1)}%</span>
-                          </div>
-                        </div>
-
-                        <div className="mt-3 h-2 rounded-full bg-[hsl(var(--surface-3))] overflow-hidden">
-                          <div className="h-full bg-[hsl(var(--accent))]" style={{ width: `${clamp(betterThan, 1, 99.7)}%` }} />
-                        </div>
-
-                        <div className="mt-2 text-xs text-subtle">
-                          Percentile is a rough approximation for fun (not official).
-                        </div>
-                      </div>
-
-                      <div className="text-sm text-muted">
-                        <span className="text-subtle">Coach:</span>{" "}
-                        <span className="font-medium">
-                          {egoLine({ avgLoss: lastElo.avgLoss, blunders: lastElo.blunders, result: result?.yours })}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="surface-subtle p-3">
-                          <div className="text-xs text-subtle">Confidence</div>
-                          <div className="text-lg font-semibold text-white">{lastElo.conf}%</div>
-                        </div>
-                        <div className="surface-subtle p-3">
-                          <div className="text-xs text-subtle">Avg centipawn loss</div>
-                          <div className="text-lg font-semibold text-white">{lastElo.avgLoss}cp</div>
-                        </div>
-                        <div className="surface-subtle p-3">
-                          <div className="text-xs text-subtle">Blunders</div>
-                          <div className="text-lg font-semibold text-white">{lastElo.blunders}</div>
-                        </div>
-                        <div className="surface-subtle p-3">
-                          <div className="text-xs text-subtle">Vs bot strength</div>
-                          <div className="text-lg font-semibold text-white">{lastElo.vs}</div>
-                        </div>
-                      </div>
-
-                      {badges.length > 0 && (
-                        <div className="flex flex-wrap gap-2 pt-1">
-                          {badges.map((b, i) => (
-                            <Pill key={i} tone={b.tone}>
-                              <span>{b.emoji}</span> {b.label}
-                            </Pill>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="text-xs text-subtle">
-                        Uses a quick 1-ply benchmark (not Stockfish). Fun estimate, not official.
-                      </div>
-                    </div>
-                  );
-                })()
-              )}
-            </div>
+            {eloEstimateBody}
 
             <h3 className="font-semibold mt-6">Last 5 games</h3>
             {history.length === 0 ? (
@@ -1295,40 +1364,57 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
             )}
           </div>
         </div>
+
+        <div className="lg:hidden space-y-4">
+          <details className="surface-card p-0 overflow-hidden">
+            <summary className="px-5 py-3 text-sm font-semibold cursor-pointer list-none">Bot controls</summary>
+            <div className="px-5 pb-5 space-y-4">{botControlsBody}</div>
+          </details>
+
+          <details className="surface-panel p-0 overflow-hidden">
+            <summary className="px-5 py-3 text-sm font-semibold cursor-pointer list-none">Elo estimate</summary>
+            <div className="px-5 pb-5">
+              {eloEstimateBody}
+
+              <h3 className="font-semibold mt-6">Last 5 games</h3>
+              {history.length === 0 ? (
+                <div className="text-subtle text-sm mt-2">No games saved yet.</div>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {avg5 && (
+                    <div className="text-sm text-muted">
+                      Average: <span className="font-semibold">{avg5.mean}</span>{" "}
+                      <span className="text-subtle">(avg conf {avg5.conf}%, n={avg5.n})</span>
+                    </div>
+                  )}
+                  <ul className="text-sm text-muted space-y-1">
+                    {history.map((h) => (
+                      <li key={h.ts} className="flex items-center justify-between">
+                        <span className="text-subtle">
+                          {new Date(h.ts).toLocaleString()} · {h.result.toUpperCase()} vs {h.botStrength}
+                        </span>
+                        <span className="font-semibold text-white">{h.elo}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </details>
+        </div>
       </div>
 
       {/* Sidebar */}
       <div className="lg:col-span-1">
-        <div className="surface-card p-5 sticky top-6 space-y-4">
+        <div className="hidden lg:block surface-card p-5 lg:sticky lg:top-6 lg:self-start space-y-4">
           <h2 className="font-semibold text-lg">Live analysis</h2>
-
-          {coachContent}
-
-          <div className="grid gap-3">
-            <div className="surface-panel p-3">
-              <div className="text-xs text-subtle">Accuracy pulse</div>
-              <div className="mt-1 flex items-center justify-between">
-                <div className="text-lg font-semibold text-white">{analysis.accuracy}%</div>
-                <div className="text-xs text-subtle">based on avg loss</div>
-              </div>
-              <div className="mt-2 h-2 rounded-full bg-[hsl(var(--surface-3))] overflow-hidden">
-                <div className="h-full" style={{ width: `${analysis.accuracy}%`, background: theme.accent }} />
-              </div>
-            </div>
-
-            <div className="surface-panel p-3">
-              <div className="text-xs text-subtle">Good-move streak</div>
-              <div className="mt-1 text-lg font-semibold text-white">{analysis.streak}</div>
-              <div className="text-xs text-subtle mt-1">
-                {analysis.streak >= 4 ? "You’re in the zone. Stay calm." : "String 4 clean moves for a streak bonus."}
-              </div>
-            </div>
-          </div>
-
-          <div className="text-xs text-subtle">
-            Disclaimer: entertainment estimate. Real Elo requires rated opponents + many games.
-          </div>
+          {liveAnalysisBody}
         </div>
+
+        <details className="lg:hidden surface-card p-0 overflow-hidden">
+          <summary className="px-5 py-3 text-sm font-semibold cursor-pointer list-none">Live analysis</summary>
+          <div className="px-5 pb-5 space-y-4">{liveAnalysisBody}</div>
+        </details>
       </div>
     </div>
   );
