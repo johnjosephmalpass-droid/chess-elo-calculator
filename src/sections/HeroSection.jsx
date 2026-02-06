@@ -1,4 +1,5 @@
 import React from "react";
+import { motion } from "framer-motion";
 import { Button, buttonVariants } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 
@@ -24,36 +25,47 @@ export default function HeroSection({ onNavigate }) {
         }}
       />
 
-      <div className="relative grid gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.4em] text-muted">Chess Elo Calculator</p>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight sm:text-6xl">Chess Elo Calculator</h1>
+      <div className="relative grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.4em] text-muted">Next-gen chess training</p>
+          <h1 className="mt-4 text-4xl font-semibold tracking-tight sm:text-6xl">
+            Track your chess Elo in <span className="text-white">minutes</span>, not months.
+          </h1>
           <p className="mt-4 text-lg text-muted sm:text-xl">
-            Play a fast game against a smart bot, get live analysis as you move, and receive an instant Elo estimate
-            built from accuracy, tactics, and streaks.
+            A polished practice suite that blends a fast bot, real-time coaching, and instant Elo estimates so you know
+            exactly where you stand after every game.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-4">
-            <Button size="lg" onClick={() => onNavigate("/play")}>Start Playing</Button>
-            <a href="#features" className={buttonVariants({ variant: "outline", size: "lg" })}>
-              See Features
+            <Button size="lg" onClick={() => onNavigate("/play")}>Start a free game</Button>
+            <a href="#preview" className={buttonVariants({ variant: "outline", size: "lg" })}>
+              View live preview
             </a>
           </div>
 
           <div className="mt-8 flex flex-wrap gap-3">
-            <Badge>Free</Badge>
+            <Badge>Free forever</Badge>
             <Badge>No sign-up</Badge>
-            <Badge>Instant Elo estimate</Badge>
+            <Badge>Live coaching</Badge>
           </div>
-        </div>
+        </motion.div>
 
-        <div className="relative">
+        <motion.div
+          className="relative"
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, ease: "easeOut", delay: 0.1 }}
+        >
           <div className="absolute -top-10 left-10 h-40 w-40 rounded-full bg-[hsl(var(--accent)/0.18)] blur-3xl" />
           <div className="absolute -bottom-12 right-6 h-40 w-40 rounded-full bg-[hsl(var(--success)/0.16)] blur-3xl" />
           <div className="surface-panel p-6">
             <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-subtle">
-              <span>Live analysis</span>
-              <span>v1.0</span>
+              <span>Session insight</span>
+              <span>Live</span>
             </div>
             <div className="mt-6 rounded-[var(--radius-md)] bg-[hsl(var(--surface-3))] p-5">
               <svg
@@ -69,8 +81,8 @@ export default function HeroSection({ onNavigate }) {
             </div>
             <div className="mt-6 grid gap-3 text-sm text-muted">
               <div className="flex items-center justify-between rounded-[var(--radius-sm)] border border-[hsl(var(--border))] bg-[hsl(var(--surface-3))] px-4 py-3">
-                <span>Current estimate</span>
-                <span className="text-white">1420 Elo</span>
+                <span>Projected Elo</span>
+                <span className="text-white">1420</span>
               </div>
               <div className="flex items-center justify-between rounded-[var(--radius-sm)] border border-[hsl(var(--border))] bg-[hsl(var(--surface-3))] px-4 py-3">
                 <span>Accuracy streak</span>
@@ -78,7 +90,7 @@ export default function HeroSection({ onNavigate }) {
               </div>
             </div>
           </div>
-        </div>
+        </motion.div>
       </div>
     </section>
   );

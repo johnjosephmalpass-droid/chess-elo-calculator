@@ -1,4 +1,5 @@
 import React from "react";
+import { motion } from "framer-motion";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 
@@ -11,8 +12,13 @@ const navLinks = [
 
 export default function NavBar({ onNavigate }) {
   return (
-    <header className="sticky top-4 z-30">
-      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-6 surface-panel px-4 py-3 backdrop-blur">
+    <motion.header
+      className="sticky top-0 z-30 border-b border-[hsl(var(--border))] bg-[hsl(var(--surface)/0.9)] backdrop-blur"
+      initial={{ y: -16, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 0.6, ease: "easeOut" }}
+    >
+      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-6 px-4 py-4">
         <a href="#top" className="flex items-center gap-3 text-sm font-semibold">
           <span className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] bg-[hsl(var(--surface-3))]">
             <svg
@@ -40,13 +46,13 @@ export default function NavBar({ onNavigate }) {
         </div>
       </div>
 
-      <nav className="mt-3 flex flex-wrap items-center justify-center gap-3 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-subtle lg:hidden">
+      <nav className="mt-3 flex flex-wrap items-center justify-center gap-3 px-4 pb-4 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-subtle lg:hidden">
         {navLinks.map((link) => (
           <a key={link.href} href={link.href}>
             <Badge variant="outline">{link.label}</Badge>
           </a>
         ))}
       </nav>
-    </header>
+    </motion.header>
   );
 }

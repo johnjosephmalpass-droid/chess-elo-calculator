@@ -10,9 +10,9 @@ import FaqSection from "../sections/FaqSection";
 
 export default function LandingPage({ onNavigate }) {
   return (
-    <div className="scroll-smooth">
+    <div className="scroll-smooth bg-[hsl(var(--surface-2))]">
       <NavBar onNavigate={onNavigate} />
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-12 px-2 pb-16 pt-10 sm:px-4">
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-12 px-4 pb-20 pt-12 sm:px-6">
         <HeroSection onNavigate={onNavigate} />
         <PreviewSection />
         <FeaturesSection />

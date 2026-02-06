@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Card } from "../components/ui/card";
 
 const faqs = [
@@ -29,10 +30,18 @@ const faqs = [
 ];
 
 export default function FaqSection() {
+  const [openIndex, setOpenIndex] = useState(0);
+
   return (
     <section className="py-16" id="faq">
       <div className="mx-auto w-full max-w-6xl">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <motion.div
+          className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          viewport={{ once: true, amount: 0.3 }}
+        >
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.4em] text-muted">FAQ</p>
             <h2 className="mt-4 text-3xl font-semibold sm:text-4xl">Questions, answered.</h2>
@@ -40,15 +49,41 @@ export default function FaqSection() {
           <p className="max-w-md text-sm text-muted">
             Everything you need to know before you start a game. If you need more help, reach out anytime.
           </p>
-        </div>
+        </motion.div>
 
         <div className="mt-10 grid gap-5 md:grid-cols-2">
-          {faqs.map((faq) => (
-            <Card key={faq.question} className="p-6">
-              <h3 className="text-base font-semibold">{faq.question}</h3>
-              <p className="mt-2 text-sm text-muted">{faq.answer}</p>
-            </Card>
-          ))}
+          {faqs.map((faq, index) => {
+            const isOpen = openIndex === index;
+            return (
+              <Card key={faq.question} className="p-0">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
+                  onClick={() => setOpenIndex(isOpen ? -1 : index)}
+                  aria-expanded={isOpen}
+                >
+                  <span className="text-base font-semibold">{faq.question}</span>
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[hsl(var(--border))] text-lg text-muted">
+                    {isOpen ? "−" : "+"}
+                  </span>
+                </button>
+                <AnimatePresence initial={false}>
+                  {isOpen && (
+                    <motion.div
+                      key="content"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.3, ease: "easeOut" }}
+                      className="overflow-hidden px-6 pb-5"
+                    >
+                      <p className="text-sm text-muted">{faq.answer}</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </Card>
+            );
+          })}
         </div>
       </div>
     </section>
