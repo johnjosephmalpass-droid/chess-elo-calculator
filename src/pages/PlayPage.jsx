@@ -1056,51 +1056,30 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
     </div>
   );
 
-  const showAnalysisSkeleton = moves.length === 0;
-
   const liveAnalysisBody = (
     <>
       {coachContent}
 
-      {showAnalysisSkeleton ? (
-        <div className="grid gap-3">
-          <div className="surface-panel p-3">
-            <div className="skeleton h-3 w-24 rounded-md" />
-            <div className="mt-3 skeleton h-6 w-16 rounded-md" />
-            <div className="mt-3 skeleton h-2 w-full rounded-full" />
+      <div className="grid gap-3">
+        <div className="surface-panel p-3">
+          <div className="text-xs text-subtle">Accuracy pulse</div>
+          <div className="mt-1 flex items-center justify-between">
+            <div className="text-lg font-semibold text-white">{analysis.accuracy}%</div>
+            <div className="text-xs text-subtle">based on avg loss</div>
           </div>
-
-          <div className="surface-panel p-3">
-            <div className="skeleton h-3 w-28 rounded-md" />
-            <div className="mt-3 skeleton h-6 w-12 rounded-md" />
-            <div className="mt-3 space-y-2">
-              <div className="skeleton h-2 w-full rounded-full" />
-              <div className="skeleton h-2 w-4/5 rounded-full" />
-            </div>
+          <div className="mt-2 h-2 rounded-full bg-[hsl(var(--surface-3))] overflow-hidden">
+            <div className="h-full" style={{ width: `${analysis.accuracy}%`, background: theme.accent }} />
           </div>
         </div>
-      ) : (
-        <div className="grid gap-3">
-          <div className="surface-panel p-3">
-            <div className="text-xs text-subtle">Accuracy pulse</div>
-            <div className="mt-1 flex items-center justify-between">
-              <div className="text-lg font-semibold text-white">{analysis.accuracy}%</div>
-              <div className="text-xs text-subtle">based on avg loss</div>
-            </div>
-            <div className="mt-2 h-2 rounded-full bg-[hsl(var(--surface-3))] overflow-hidden">
-              <div className="h-full" style={{ width: `${analysis.accuracy}%`, background: theme.accent }} />
-            </div>
-          </div>
 
-          <div className="surface-panel p-3">
-            <div className="text-xs text-subtle">Good-move streak</div>
-            <div className="mt-1 text-lg font-semibold text-white">{analysis.streak}</div>
-            <div className="text-xs text-subtle mt-1">
-              {analysis.streak >= 4 ? "You’re in the zone. Stay calm." : "String 4 clean moves for a streak bonus."}
-            </div>
+        <div className="surface-panel p-3">
+          <div className="text-xs text-subtle">Good-move streak</div>
+          <div className="mt-1 text-lg font-semibold text-white">{analysis.streak}</div>
+          <div className="text-xs text-subtle mt-1">
+            {analysis.streak >= 4 ? "You’re in the zone. Stay calm." : "String 4 clean moves for a streak bonus."}
           </div>
         </div>
-      )}
+      </div>
 
       <div className="text-xs text-subtle">
         Disclaimer: entertainment estimate. Real Elo requires rated opponents + many games.
@@ -1120,7 +1099,7 @@ export default function PlayPage({ theme, themeId, setThemeId }) {
                 <button
                   key={t.id}
                   onClick={() => setThemeId(t.id)}
-                  className={`app-button app-button--secondary flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border px-3 py-2 text-left text-sm transition ${
+                  className={`flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border px-3 py-2 text-left text-sm transition ${
                     themeId === t.id
                       ? "border-[hsl(var(--accent)/0.6)] bg-[hsl(var(--accent)/0.15)]"
                       : "border-[hsl(var(--border))] hover:bg-[hsl(var(--surface-3))]"
