@@ -1,4 +1,5 @@
 import React from "react";
+import { Card } from "../components/ui/card";
 
 const faqs = [
   {
@@ -33,20 +34,20 @@ export default function FaqSection() {
       <div className="mx-auto w-full max-w-6xl">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">FAQ</p>
-            <h2 className="mt-4 text-3xl font-semibold text-white sm:text-4xl">Questions, answered.</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.4em] text-muted">FAQ</p>
+            <h2 className="mt-4 text-3xl font-semibold sm:text-4xl">Questions, answered.</h2>
           </div>
-          <p className="max-w-md text-sm text-slate-300">
+          <p className="max-w-md text-sm text-muted">
             Everything you need to know before you start a game. If you need more help, reach out anytime.
           </p>
         </div>
 
         <div className="mt-10 grid gap-5 md:grid-cols-2">
           {faqs.map((faq) => (
-            <div key={faq.question} className="rounded-3xl border border-white/10 bg-slate-950/50 p-6">
-              <h3 className="text-base font-semibold text-white">{faq.question}</h3>
-              <p className="mt-2 text-sm text-slate-300">{faq.answer}</p>
-            </div>
+            <Card key={faq.question} className="p-6">
+              <h3 className="text-base font-semibold">{faq.question}</h3>
+              <p className="mt-2 text-sm text-muted">{faq.answer}</p>
+            </Card>
           ))}
         </div>
       </div>

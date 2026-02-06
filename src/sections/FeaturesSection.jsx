@@ -1,4 +1,5 @@
 import React from "react";
+import { Card } from "../components/ui/card";
 
 const features = [
   {
@@ -33,26 +34,26 @@ export default function FeaturesSection() {
       <div className="mx-auto w-full max-w-6xl">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">Features</p>
-            <h2 className="mt-4 text-3xl font-semibold text-white sm:text-4xl">Everything you need to learn fast.</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.4em] text-muted">Features</p>
+            <h2 className="mt-4 text-3xl font-semibold sm:text-4xl">Everything you need to learn fast.</h2>
           </div>
-          <p className="max-w-md text-sm text-slate-300">
+          <p className="max-w-md text-sm text-muted">
             The right tools to measure improvement without the noise. Built for quick sessions and smart insights.
           </p>
         </div>
 
         <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           {features.map((feature) => (
-            <div
+            <Card
               key={feature.title}
-              className="group rounded-3xl border border-white/10 bg-slate-950/50 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)] transition hover:-translate-y-1 hover:border-white/30"
+              className="group p-6 transition hover:-translate-y-1 hover:border-[hsl(var(--accent)/0.5)]"
             >
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-xl text-white">
+              <div className="flex h-12 w-12 items-center justify-center rounded-[var(--radius-sm)] bg-[hsl(var(--surface-3))] text-xl">
                 ♟️
               </div>
-              <h3 className="mt-4 text-lg font-semibold text-white">{feature.title}</h3>
-              <p className="mt-2 text-sm text-slate-300">{feature.description}</p>
-            </div>
+              <h3 className="mt-4 text-lg font-semibold">{feature.title}</h3>
+              <p className="mt-2 text-sm text-muted">{feature.description}</p>
+            </Card>
           ))}
         </div>
       </div>
