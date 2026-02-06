@@ -1,9 +1,16 @@
 import React from "react";
+import { motion } from "framer-motion";
 import { buttonVariants } from "./ui/button";
 
 export default function Footer({ onNavigate }) {
   return (
-    <footer className="border-t border-[hsl(var(--border))] bg-[hsl(var(--surface))] px-6 py-10">
+    <motion.footer
+      className="border-t border-[hsl(var(--border))] bg-[hsl(var(--surface))] px-6 py-10"
+      initial={{ opacity: 0, y: 24 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.6, ease: "easeOut" }}
+      viewport={{ once: true, amount: 0.2 }}
+    >
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-sm)] bg-[hsl(var(--surface-3))]">
@@ -41,6 +48,6 @@ export default function Footer({ onNavigate }) {
       <div className="mx-auto mt-8 w-full max-w-6xl text-xs text-subtle">
         © {new Date().getFullYear()} Chess Elo Calculator. All rights reserved.
       </div>
-    </footer>
+    </motion.footer>
   );
 }
