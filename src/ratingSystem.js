@@ -77,8 +77,10 @@ export function getConfidenceLabel(gamesRated) {
 export function getInitialRatingState() {
   const uncertainty = getRangeFromGames(0);
   return {
+    playerEloInternal: DEFAULT_ELO,
     playerElo: DEFAULT_ELO,
     gamesRated: 0,
+    isCalibrated: false,
     uncertainty,
     rangeLow: DEFAULT_ELO - uncertainty,
     rangeHigh: DEFAULT_ELO + uncertainty,
@@ -147,7 +149,11 @@ export function estimatePerformanceElo({
 }
 
 export function updatePlayerElo(ratingState, opponentElo, gameResult, analysisSummary) {
-  const currentElo = Number.isFinite(ratingState?.playerElo) ? ratingState.playerElo : DEFAULT_ELO;
+  const currentElo = Number.isFinite(ratingState?.playerEloInternal)
+    ? ratingState.playerEloInternal
+    : Number.isFinite(ratingState?.playerElo)
+    ? ratingState.playerElo
+    : DEFAULT_ELO;
   const gamesRated = Number.isFinite(ratingState?.gamesRated) ? ratingState.gamesRated : 0;
 
   const actualScore = getResultScore(gameResult);
@@ -176,8 +182,10 @@ export function updatePlayerElo(ratingState, opponentElo, gameResult, analysisSu
   return {
     nextState: {
       ...ratingState,
+      playerEloInternal: playerElo,
       playerElo,
       gamesRated: nextGamesRated,
+      isCalibrated: nextGamesRated > 0,
       uncertainty,
       rangeLow: clamp(playerElo - uncertainty, MIN_ELO, MAX_ELO),
       rangeHigh: clamp(playerElo + uncertainty, MIN_ELO, MAX_ELO),
@@ -215,7 +223,11 @@ export function chooseBotElo(ratingState, lastGameSummary) {
     return DEFAULT_ELO;
   }
 
-  const baseElo = Number.isFinite(ratingState?.playerElo) ? ratingState.playerElo : DEFAULT_ELO;
+  const baseElo = Number.isFinite(ratingState?.playerEloInternal)
+    ? ratingState.playerEloInternal
+    : Number.isFinite(ratingState?.playerElo)
+    ? ratingState.playerElo
+    : DEFAULT_ELO;
 
   if (gamesRated < 5) {
     let adjustmentFromLastResult = 0;
