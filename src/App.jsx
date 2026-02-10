@@ -871,6 +871,11 @@ export default function App() {
         ? {
             ...getInitialRatingState(),
             ...parsed,
+            playerEloInternal:
+              typeof parsed.playerEloInternal === "number" && Number.isFinite(parsed.playerEloInternal)
+                ? parsed.playerEloInternal
+                : parsed.playerElo,
+            isCalibrated: (parsed.gamesRated || 0) > 0,
             confidence: getConfidenceLabel(parsed.gamesRated || 0),
           }
         : getInitialRatingState();
@@ -1193,6 +1198,7 @@ export default function App() {
     });
 
     const ratingUpdate = updatePlayerElo(ratingState, botEloUsedThisGame, res, analysisSummary);
+    const wasUncalibrated = ratingState.gamesRated === 0;
     setRatingState(ratingUpdate.nextState);
     setLastRatedSummary({
       playerElo: ratingUpdate.nextState.playerElo,
@@ -1203,6 +1209,11 @@ export default function App() {
       performanceElo: ratingUpdate.summary.performanceElo,
     });
     setLastGameSummaryForBot(ratingUpdate.nextState.lastGameSummary);
+    if (wasUncalibrated) {
+      setToastMessage(
+        `First estimate ready: ${ratingUpdate.nextState.playerElo} (±${ratingUpdate.summary.uncertainty})`,
+      );
+    }
     setDebugInfo({
       botEloUsedThisGame,
       expectedScore: ratingUpdate.summary.expectedScore,
@@ -1377,12 +1388,23 @@ Mode: <b>Rated</b>
               </div>
 
               <div className="rounded-2xl border border-sky-300/25 bg-sky-500/10 p-4 min-w-[260px] text-right">
-                <div className="text-xs uppercase tracking-wide text-sky-200/80">Estimated Elo</div>
-                <div className="text-2xl font-bold text-sky-100">
-                  {ratingState.playerElo} <span className="text-sm font-medium">({ratingState.rangeLow}–{ratingState.rangeHigh})</span>
+                <div className="text-xs uppercase tracking-wide text-sky-200/80">
+                  Estimated Elo: {ratingState.gamesRated === 0 ? "Unknown" : ratingState.playerElo}
                 </div>
-                <div className="text-xs text-sky-200/90 mt-1">Confidence: {ratingState.confidence}</div>
-                {!result ? <div className="text-xs text-sky-300/90 mt-1">Adjusting…</div> : null}
+                <div className="text-2xl font-bold text-sky-100">
+                  {ratingState.gamesRated === 0 ? "Unknown" : ratingState.playerElo}
+                  {ratingState.gamesRated > 0 ? (
+                    <span className="text-sm font-medium"> ({ratingState.rangeLow}–{ratingState.rangeHigh})</span>
+                  ) : null}
+                </div>
+                <div className="text-xs text-sky-200/90 mt-1">
+                  Confidence: {ratingState.gamesRated === 0 ? "Uncalibrated" : ratingState.confidence}
+                </div>
+                {!result ? (
+                  <div className="text-xs text-sky-300/90 mt-1">
+                    {ratingState.gamesRated === 0 ? "Finding your level…" : "Adjusting…"}
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex gap-2">
@@ -1403,10 +1425,18 @@ Mode: <b>Rated</b>
 
             <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4">
               <div className="text-sm text-sky-100 font-medium">
-                {ratingState.gamesRated < 5 ? "Calibrating… Play 5 rated games…" : "Calibration active"}
+                {ratingState.gamesRated === 0
+                  ? "Play 1 rated game to get your first estimate."
+                  : ratingState.gamesRated < 5
+                  ? "Calibrating… Play 5 rated games…"
+                  : "Calibration active"}
               </div>
-              <div className="text-sm sm:text-base font-medium text-sky-100">Range: {ratingState.rangeLow}–{ratingState.rangeHigh}</div>
-              <div className="text-xs text-sky-200/90 mt-1">Confidence: {ratingState.confidence}</div>
+              <div className="text-sm sm:text-base font-medium text-sky-100">
+                Range: {ratingState.gamesRated === 0 ? "—" : `${ratingState.rangeLow}–${ratingState.rangeHigh}`}
+              </div>
+              <div className="text-xs text-sky-200/90 mt-1">
+                Confidence: {ratingState.gamesRated === 0 ? "Uncalibrated" : ratingState.confidence}
+              </div>
               {lastRatedSummary ? (
                 <div className="text-xs text-sky-100 mt-2">
                   Updated estimate: {lastRatedSummary.playerElo} ({lastRatedSummary.rangeLow}–{lastRatedSummary.rangeHigh})
