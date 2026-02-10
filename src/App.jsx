@@ -560,10 +560,12 @@ function moveToUci(move) {
 }
 
 function classifyLoss(cpLoss) {
-  if (cpLoss >= 300) return "blunder";
-  if (cpLoss >= 150) return "mistake";
-  if (cpLoss >= 50) return "inaccuracy";
-  return "ok";
+  if (cpLoss <= 20) return "best";
+  if (cpLoss <= 50) return "excellent";
+  if (cpLoss <= 90) return "good";
+  if (cpLoss <= 180) return "inaccuracy";
+  if (cpLoss <= 320) return "mistake";
+  return "blunder";
 }
 
 function sideToMoveFromFen(fen) {
@@ -600,6 +602,9 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
       blunders: 0,
       mistakes: 0,
       inaccuracies: 0,
+      goodMoves: 0,
+      excellentMoves: 0,
+      bestMoves: 0,
       accuracy: 100,
       moveBreakdown: [],
       mateSeen: false,
@@ -612,28 +617,54 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
   let blunders = 0;
   let mistakes = 0;
   let inaccuracies = 0;
+  let goodMoves = 0;
+  let excellentMoves = 0;
+  let bestMoves = 0;
   let mateSeen = false;
 
   for (const snapshot of userMoveSnapshots) {
     const before = await evaluatePosition(snapshot.fenBefore, movetimeMs);
+    const bestMoveUci = await getBestMoveStyled(snapshot.fenBefore, "endgame-grinder", movetimeMs);
+
+    const bestChess = new Chess(snapshot.fenBefore);
+    const bestMove = parseUciMove(bestMoveUci);
+    const parsedBest =
+      bestMove &&
+      bestChess.move({
+        from: bestMove.from,
+        to: bestMove.to,
+        promotion: bestMove.promo || undefined,
+      });
+
+    const bestFenAfter = parsedBest ? bestChess.fen() : snapshot.fenAfter;
+    const bestAfter = await evaluatePosition(bestFenAfter, movetimeMs);
     const after = await evaluatePosition(snapshot.fenAfter, movetimeMs);
 
-    if (before.type === "mate" || after.type === "mate") mateSeen = true;
+    if (before.type === "mate" || after.type === "mate" || bestAfter.type === "mate") mateSeen = true;
 
     const scoreBefore = scoreFromUserPerspective(before, snapshot.fenBefore, youColor);
+    const scoreBestAfter = scoreFromUserPerspective(bestAfter, bestFenAfter, youColor);
     const scoreAfter = scoreFromUserPerspective(after, snapshot.fenAfter, youColor);
-    const cpLoss = Math.max(0, Math.round(scoreBefore - scoreAfter));
+    const cpLossFromBest = Math.max(0, Math.round(scoreBestAfter - scoreAfter));
+    const cpLossFromBefore = Math.max(0, Math.round(scoreBefore - scoreAfter));
+    const cpLoss = Math.max(cpLossFromBest, cpLossFromBefore);
     const classification = classifyLoss(cpLoss);
 
     if (classification === "blunder") blunders += 1;
     else if (classification === "mistake") mistakes += 1;
     else if (classification === "inaccuracy") inaccuracies += 1;
+    else if (classification === "good") goodMoves += 1;
+    else if (classification === "excellent") excellentMoves += 1;
+    else if (classification === "best") bestMoves += 1;
 
     totalLoss += cpLoss;
     moveBreakdown.push({
       move: moveToUci(snapshot.move),
       cpLoss,
+      cpLossFromBest,
+      cpLossFromBefore,
       scoreBefore,
+      scoreBestAfter,
       scoreAfter,
       classification,
     });
@@ -641,7 +672,9 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
 
   const movesAnalyzed = moveBreakdown.length;
   const acpl = movesAnalyzed ? Math.round(totalLoss / movesAnalyzed) : 0;
-  const accuracy = clamp(Math.round(100 - acpl * 0.45 - blunders * 5 - mistakes * 2), 20, 99);
+  const weightedPenalty =
+    blunders * 12 + mistakes * 6 + inaccuracies * 2 + goodMoves * 0.5 + excellentMoves * 0.15;
+  const accuracy = clamp(Math.round(100 - acpl * 0.42 - weightedPenalty), 10, 99);
 
   return {
     movesAnalyzed,
@@ -649,6 +682,9 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
     blunders,
     mistakes,
     inaccuracies,
+    goodMoves,
+    excellentMoves,
+    bestMoves,
     accuracy,
     moveBreakdown,
     mateSeen,
