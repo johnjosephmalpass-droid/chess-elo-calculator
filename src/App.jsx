@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import CoachFeedback from "./CoachFeedback";
+import CoachRoast from "./CoachRoast";
 import { evaluatePosition, getBestMoveStyled, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
+import { getCoachLine } from "./coachRoastLines";
 import {
   chooseBotElo,
   getConfidenceLabel,
@@ -566,6 +567,21 @@ function classifyLoss(cpLoss) {
   return "ok";
 }
 
+function classifyCoachBucket({ cpLoss, scoreBefore, scoreAfter, afterType, youColor, fenAfter }) {
+  const evalDelta = Math.round(scoreAfter - scoreBefore);
+  const sideToMove = sideToMoveFromFen(fenAfter);
+  const forcedMateAgainstUser = afterType === "mate" && sideToMove !== youColor && scoreAfter <= -9100;
+
+  if (forcedMateAgainstUser) return { bucket: "blunder", evalDelta };
+  if (cpLoss <= 5 || evalDelta > 150) return { bucket: "brilliant", evalDelta };
+  if (cpLoss <= 15) return { bucket: "great", evalDelta };
+  if (cpLoss <= 40) return { bucket: "good", evalDelta };
+  if (cpLoss >= 300) return { bucket: "blunder", evalDelta };
+  if (cpLoss >= 150) return { bucket: "mistake", evalDelta };
+  if (cpLoss >= 80) return { bucket: "inaccuracy", evalDelta };
+  return { bucket: "meh", evalDelta };
+}
+
 function sideToMoveFromFen(fen) {
   return fen.split(" ")[1] || "w";
 }
@@ -658,6 +674,7 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
 
 const RATING_STORAGE_KEY = "chess-elo-calculator:rating-state";
 const PERSONALITY_STORAGE_KEY = "chess-elo-calculator:bot-personality";
+const ROAST_MODE_STORAGE_KEY = "chess-elo-calculator:roast-mode";
 
 const THEMES = [
   {
@@ -870,6 +887,16 @@ export default function App() {
   const [lastMove, setLastMove] = useState(null);
   const [botGlowSquare, setBotGlowSquare] = useState(null);
   const [checkedKingSquare, setCheckedKingSquare] = useState(null);
+  const [roastMode, setRoastMode] = useState(() => localStorage.getItem(ROAST_MODE_STORAGE_KEY) !== "off");
+  const [coachState, setCoachState] = useState({
+    lastUserMove: null,
+    cpl: null,
+    bucket: "meh",
+    evalDelta: null,
+    message: getCoachLine("thinking"),
+  });
+  const [coachIsThinking, setCoachIsThinking] = useState(false);
+  const [recentCoachLines, setRecentCoachLines] = useState([]);
 
   // castling rights
   const [castle, setCastle] = useState({ wK: true, wQ: true, bK: true, bQ: true });
@@ -950,10 +977,24 @@ export default function App() {
   }, [personalityId, personality]);
 
   useEffect(() => {
+    localStorage.setItem(ROAST_MODE_STORAGE_KEY, roastMode ? "on" : "off");
+  }, [roastMode]);
+
+  useEffect(() => {
     if (!botGlowSquare) return undefined;
     const timer = setTimeout(() => setBotGlowSquare(null), 300);
     return () => clearTimeout(timer);
   }, [botGlowSquare]);
+
+  useEffect(() => {
+    if (!coachState.lastUserMove || coachIsThinking) return;
+    const message = getCoachLine(coachState.bucket, {
+      san: coachState.lastUserMove.san,
+      recentLines: recentCoachLines,
+      roastMode,
+    });
+    setCoachState((prev) => ({ ...prev, message }));
+  }, [roastMode]);
 
   async function handleSelfTest() {
     setSelfTestBusy(true);
@@ -969,6 +1010,54 @@ export default function App() {
       setSelfTestError(error?.message || "Stockfish self-test failed to produce a bestmove.");
     } finally {
       setSelfTestBusy(false);
+    }
+  }
+
+  async function triggerCoachEvaluation({ fenBefore, fenAfter, move }) {
+    setCoachIsThinking(true);
+
+    setCoachState((prev) => ({
+      ...prev,
+      lastUserMove: move,
+    }));
+
+    try {
+      const [beforeEval, afterEval] = await Promise.all([evaluatePosition(fenBefore, 80), evaluatePosition(fenAfter, 80)]);
+
+      const scoreBefore = scoreFromUserPerspective(beforeEval, fenBefore, youColor);
+      const scoreAfter = scoreFromUserPerspective(afterEval, fenAfter, youColor);
+      const cpl = Math.max(0, Math.round(scoreBefore - scoreAfter));
+      const { bucket, evalDelta } = classifyCoachBucket({
+        cpLoss: cpl,
+        scoreBefore,
+        scoreAfter,
+        afterType: afterEval?.type,
+        youColor,
+        fenAfter,
+      });
+
+      const message = getCoachLine(bucket, { san: move.san, recentLines: recentCoachLines, roastMode });
+      setCoachState({
+        lastUserMove: move,
+        cpl,
+        bucket,
+        evalDelta,
+        message,
+      });
+      setRecentCoachLines((prev) => [message.line, ...prev].slice(0, 2));
+    } catch (error) {
+      console.error("Coach evaluation failed", error);
+      const message = getCoachLine("meh", { san: move.san, recentLines: recentCoachLines, roastMode });
+      setCoachState({
+        lastUserMove: move,
+        cpl: null,
+        bucket: "meh",
+        evalDelta: null,
+        message,
+      });
+      setRecentCoachLines((prev) => [message.line, ...prev].slice(0, 2));
+    } finally {
+      setCoachIsThinking(false);
     }
   }
 
@@ -1106,6 +1195,15 @@ export default function App() {
     setCheckedKingSquare(null);
     setBotGlowSquare(null);
     setBotStatusLine(personality.quips[0]);
+    setCoachIsThinking(false);
+    setRecentCoachLines([]);
+    setCoachState({
+      lastUserMove: null,
+      cpl: null,
+      bucket: "meh",
+      evalDelta: null,
+      message: getCoachLine("thinking"),
+    });
   }
 
 
@@ -1142,16 +1240,24 @@ export default function App() {
     const loss = lossForMove(board, candidate, turn, castle);
     const nextCastle = updateCastleRights(castle, board, candidate);
 
+    const fenBefore = boardToFen(board, turn, castle, moves.length);
     const nb = applyMove(board, candidate);
     const nextTurn = opposite(turn);
+    const fenAfter = boardToFen(nb, nextTurn, nextCastle, moves.length + 1);
     const gr = gameResult(nb, nextTurn, nextCastle);
+
+    const chessForSan = new Chess(fenBefore);
+    const sanMove = chessForSan.move({ from: candidate.from, to: candidate.to, promotion: candidate.promo || undefined });
+    const moveForCoach = { ...candidate, san: sanMove?.san || formatMove(candidate) };
+
+    triggerCoachEvaluation({ fenBefore, fenAfter, move: moveForCoach });
 
     setBoard(nb);
     setCastle(nextCastle);
     setMoves((prev) => [...prev, { ...candidate, side: turn, loss }]);
     setTurn(nextTurn);
     setSelected(null);
-    setLastMove({ from: candidate.from, to: candidate.to });
+    setLastMove({ from: candidate.from, to: candidate.to, san: moveForCoach.san });
     setCheckedKingSquare(getCheckedKingSquare(nb, nextTurn));
 
     if (gr) {
@@ -1274,7 +1380,7 @@ Mode: <b>Rated</b>
               </div>
 
               <div className="p-4 sm:p-6 space-y-4">
-                <div className="grid grid-cols-1 xl:grid-cols-[auto_280px] gap-4 items-start">
+                <div className="grid grid-cols-1 gap-4 items-start">
                   {/* Board frame */}
                   <div className="w-fit mx-auto rounded-3xl p-3 bg-neutral-950/40 border border-white/10 shadow-[0_20px_80px_rgba(0,0,0,0.6)]">
                     {/* file labels top */}
@@ -1390,13 +1496,21 @@ Mode: <b>Rated</b>
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-white/10 bg-neutral-950/45 p-4 shadow-lg">
-                    <div className="text-sm uppercase tracking-wide text-neutral-300 mb-2">Coach</div>
-                    <CoachFeedback moves={moves} youColor={youColor} result={result} />
+                  <div className="lg:hidden">
+                    <CoachRoast
+                      lastUserMove={coachState.lastUserMove}
+                      cpl={coachState.cpl}
+                      bucket={coachState.bucket}
+                      evalDelta={coachState.evalDelta}
+                      isThinking={coachIsThinking}
+                      roastMode={roastMode}
+                      onToggleRoastMode={() => setRoastMode((prev) => !prev)}
+                      coachMessage={coachState.message}
+                    />
                   </div>
                 </div>
 
-                <div className="text-sm italic text-neutral-300 text-center xl:text-left">
+                <div className="text-sm italic text-neutral-300 text-center lg:text-left">
                   {personality.name}: {botStatusLine}
                 </div>
 
@@ -1507,6 +1621,19 @@ Mode: <b>Rated</b>
           {/* Sidebar */}
           <div className="lg:col-span-1">
             <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sticky top-6 space-y-4">
+              <div className="hidden lg:block">
+                <CoachRoast
+                  lastUserMove={coachState.lastUserMove}
+                  cpl={coachState.cpl}
+                  bucket={coachState.bucket}
+                  evalDelta={coachState.evalDelta}
+                  isThinking={coachIsThinking}
+                  roastMode={roastMode}
+                  onToggleRoastMode={() => setRoastMode((prev) => !prev)}
+                  coachMessage={coachState.message}
+                />
+              </div>
+
               <h2 className="font-semibold text-lg">Live analysis</h2>
 
               <div className="grid gap-3">
