@@ -487,7 +487,7 @@ function evalBoard(board) {
   return score;
 }
 
-function lossForMove(boardBefore, mv, side, castle) {
+function heuristicLossForMove(boardBefore, mv, side, castle) {
   const moves = legalMoves(boardBefore, side, castle);
   if (moves.length === 0) return 0;
 
@@ -503,6 +503,47 @@ function lossForMove(boardBefore, mv, side, castle) {
   const played = side === "w" ? evalBoard(playedNb) : -evalBoard(playedNb);
 
   return Math.max(0, best - played);
+}
+
+async function stockfishLossForMove(boardBefore, mv, side, castle, plyCount, thinkMs = 90) {
+  const legal = legalMoves(boardBefore, side, castle);
+  if (!legal.length) return 0;
+
+  const fenBefore = boardToFen(boardBefore, side, castle, plyCount);
+  const bestUci = await getBestMoveStyled(fenBefore, "endgame-grinder", thinkMs);
+  const bestParsed = parseUciMove(bestUci);
+
+  const matchedBest = bestParsed
+    ? legal.find(
+        (move) =>
+          move.from === bestParsed.from &&
+          move.to === bestParsed.to &&
+          (move.promo || null) === (bestParsed.promo || null),
+      )
+    : null;
+
+  const bestMove = matchedBest || mv;
+  const playedBoard = applyMove(boardBefore, mv);
+  const bestBoard = applyMove(boardBefore, bestMove);
+
+  const playedFen = boardToFen(playedBoard, opposite(side), updateCastleRights(castle, boardBefore, mv), plyCount + 1);
+  const bestFen = boardToFen(bestBoard, opposite(side), updateCastleRights(castle, boardBefore, bestMove), plyCount + 1);
+
+  const [playedEval, bestEval] = await Promise.all([
+    evaluatePosition(playedFen, thinkMs),
+    evaluatePosition(bestFen, thinkMs),
+  ]);
+
+  return Math.max(0, Math.round((playedEval?.cp || 0) - (bestEval?.cp || 0)));
+}
+
+async function lossForMove(boardBefore, mv, side, castle, plyCount) {
+  try {
+    return await stockfishLossForMove(boardBefore, mv, side, castle, plyCount);
+  } catch (error) {
+    console.warn("Stockfish live move-loss failed, using heuristic fallback", error);
+    return heuristicLossForMove(boardBefore, mv, side, castle);
+  }
 }
 
 function formatMove(mv) {
@@ -1045,7 +1086,7 @@ export default function App() {
           return;
         }
 
-        const loss = lossForMove(board, mv, turn, castle);
+        const loss = await lossForMove(board, mv, turn, castle, moves.length);
         const nextCastle = updateCastleRights(castle, board, mv);
 
         const nb = applyMove(board, mv);
@@ -1151,7 +1192,7 @@ export default function App() {
   }
 
 
-  function handleSquareClick(sq) {
+  async function handleSquareClick(sq) {
     if (result) return;
     if (turn !== youColor) return;
 
@@ -1181,7 +1222,7 @@ export default function App() {
       }
     }
 
-    const loss = lossForMove(board, candidate, turn, castle);
+    const loss = await lossForMove(board, candidate, turn, castle, moves.length);
     const nextCastle = updateCastleRights(castle, board, candidate);
 
     const nb = applyMove(board, candidate);
