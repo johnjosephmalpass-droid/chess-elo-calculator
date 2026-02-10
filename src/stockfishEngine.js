@@ -357,6 +357,44 @@ async function searchEvaluationOnce(fen, thinkMs) {
   return latestScore;
 }
 
+async function searchEvaluationDetailedOnce(fen, thinkMs) {
+  await initEngine();
+  await syncReady();
+
+  const moveTime = Math.max(50, Math.round(thinkMs ?? DEFAULT_MOVE_TIME_MS));
+  const fenUsed = String(fen);
+  post(`position fen ${fenUsed}`);
+  post(`go movetime ${moveTime}`);
+
+  let latest = null;
+
+  while (true) {
+    const line = await waitForNextLine(
+      HARD_SEARCH_TIMEOUT_MS,
+      `Stockfish evaluation timeout after ${HARD_SEARCH_TIMEOUT_MS}ms`,
+    );
+
+    const parsed = parseInfoScore(line);
+    if (parsed) {
+      const depthMatch = line.match(/\bdepth\s+(\d+)/);
+      latest = {
+        ...parsed,
+        depth: Number.parseInt(depthMatch?.[1] || "0", 10),
+        line,
+      };
+    }
+
+    if (line.startsWith("bestmove ")) {
+      break;
+    }
+  }
+
+  return {
+    fenUsed,
+    score: latest || { type: "cp", value: 0, cp: 0, depth: 0, line: null },
+  };
+}
+
 async function searchBestMoveStyledOnce(fen, thinkMs, personalityId) {
   await initEngine();
   await syncReady();
@@ -434,6 +472,24 @@ export async function evaluateFen(fen, { movetimeMs = 100 } = {}) {
     return { type: "mate", mate: score.value, cp: score.cp };
   }
   return { type: "cp", cp: score?.cp ?? 0 };
+}
+
+export async function analyzeFenRaw(fen, { movetimeMs = 100 } = {}) {
+  if (!fen || typeof fen !== "string") {
+    throw new Error("A FEN string is required for analyzeFenRaw");
+  }
+
+  return withQueue(async () => {
+    try {
+      return await searchEvaluationDetailedOnce(fen, movetimeMs);
+    } catch (error) {
+      const isTimeout = /timeout/i.test(error?.message || "");
+      if (!isTimeout) throw error;
+
+      await restartEngine(error.message);
+      return searchEvaluationDetailedOnce(fen, movetimeMs);
+    }
+  });
 }
 
 export async function runSelfTest() {

@@ -6,35 +6,13 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function smoothStep(value, edge0, edge1) {
-  if (edge0 === edge1) return value >= edge1 ? 1 : 0;
-  const t = clamp((value - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
-}
-
 function getQualityAdjustment(acpl) {
   if (!Number.isFinite(acpl)) return 0;
-
-  const bands = [
-    { cp: 15, score: 250 },
-    { cp: 30, score: 150 },
-    { cp: 60, score: 50 },
-    { cp: 100, score: -50 },
-    { cp: 160, score: -200 },
-    { cp: 250, score: -400 },
-  ];
-
-  if (acpl <= bands[0].cp) return bands[0].score;
-
-  for (let i = 0; i < bands.length - 1; i++) {
-    const a = bands[i];
-    const b = bands[i + 1];
-    if (acpl <= b.cp) {
-      const t = smoothStep(acpl, a.cp, b.cp);
-      return Math.round(a.score + (b.score - a.score) * t);
-    }
-  }
-
+  if (acpl <= 20) return 250;
+  if (acpl <= 35) return 150;
+  if (acpl <= 60) return 50;
+  if (acpl <= 90) return -75;
+  if (acpl <= 130) return -200;
   return -400;
 }
 
@@ -45,8 +23,8 @@ function getResultScore(gameResult) {
 }
 
 function getResultAdjustment(gameResult) {
-  if (gameResult === "win") return 120;
-  if (gameResult === "loss") return -120;
+  if (gameResult === "win") return 140;
+  if (gameResult === "loss") return -140;
   return 0;
 }
 
@@ -110,7 +88,6 @@ export function estimatePerformanceElo({
   acpl,
   blunders = 0,
   mistakes = 0,
-  inaccuracies = 0,
   result,
   opponentElo,
   movesAnalyzed = 0,
@@ -122,9 +99,7 @@ export function estimatePerformanceElo({
   const qualityAdjustment = getQualityAdjustment(acpl);
   const blunderPenalty = -Math.min(360, Math.max(0, blunders) * 120);
   const mistakePenalty = -Math.min(240, Math.max(0, mistakes) * 60);
-  const inaccuracyPenalty = -Math.min(120, Math.max(0, inaccuracies) * 20);
-
-  const rawPerformance = base + resultAdjustment + qualityAdjustment + blunderPenalty + mistakePenalty + inaccuracyPenalty;
+  const rawPerformance = base + resultAdjustment + qualityAdjustment + blunderPenalty + mistakePenalty;
   const performanceElo = clamp(Math.round(rawPerformance), MIN_ELO, MAX_ELO);
 
   const baseRange = getRangeFromGames(0);
@@ -143,7 +118,6 @@ export function estimatePerformanceElo({
       qualityAdjustment,
       blunderPenalty,
       mistakePenalty,
-      inaccuracyPenalty,
     },
   };
 }
@@ -168,11 +142,14 @@ export function updatePlayerElo(ratingState, opponentElo, gameResult, analysisSu
   });
 
   const alpha = getAlpha(gamesRated);
-  const blended = Math.round((1 - alpha) * eloAfterClassic + alpha * perf.performanceElo);
+  const blendedBase = gamesRated === 0
+    ? perf.performanceElo
+    : Math.round((1 - alpha) * currentElo + alpha * perf.performanceElo);
+  const blended = Math.round((blendedBase + eloAfterClassic) / 2);
   const maxSwing = getMaxSwing(gamesRated);
   const lowerBound = currentElo - maxSwing;
   const upperBound = currentElo + maxSwing;
-  const playerElo = clamp(blended, lowerBound, upperBound);
+  const playerElo = gamesRated === 0 ? perf.performanceElo : clamp(blended, lowerBound, upperBound);
 
   const nextGamesRated = gamesRated + 1;
   const baseUncertainty = getRangeFromGames(nextGamesRated);

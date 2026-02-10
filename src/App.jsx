@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachRoast from "./CoachRoast";
-import { evaluateFen, evaluatePosition, getBestMoveStyled, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
+import { getBestMoveStyled, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
+import { computeMoveLoss } from "./engine/stockfishEval.js";
 import { getCoachLine } from "./coachRoastLines";
 import {
   chooseBotElo,
@@ -489,24 +490,6 @@ function evalBoard(board) {
   return score;
 }
 
-function lossForMove(boardBefore, mv, side, castle) {
-  const moves = legalMoves(boardBefore, side, castle);
-  if (moves.length === 0) return 0;
-
-  const scored = moves.map((m) => {
-    const nb = applyMove(boardBefore, m);
-    const s = evalBoard(nb);
-    return { m, v: side === "w" ? s : -s };
-  });
-  scored.sort((a, b) => b.v - a.v);
-  const best = scored[0].v;
-
-  const playedNb = applyMove(boardBefore, mv);
-  const played = side === "w" ? evalBoard(playedNb) : -evalBoard(playedNb);
-
-  return Math.max(0, best - played);
-}
-
 function formatMove(mv) {
   const isCastle =
     (mv.from === "e1" && (mv.to === "g1" || mv.to === "c1")) ||
@@ -568,45 +551,8 @@ function classifyLoss(cpLoss) {
   return "ok";
 }
 
-function normalizeEval(scoreObj, sideToMove, userColor) {
-  if (!scoreObj) return 0;
-
-  if (scoreObj.type === "mate" && Number.isFinite(scoreObj.mate)) {
-    const sign = Math.sign(scoreObj.mate || 1);
-    const absDistance = Math.min(99, Math.abs(scoreObj.mate));
-    const cpFromSideToMove = sign * (10000 - absDistance * 100);
-    return sideToMove === userColor ? cpFromSideToMove : -cpFromSideToMove;
-  }
-
-  const cpFromSideToMove = Number.isFinite(scoreObj.cp) ? scoreObj.cp : 0;
-  return sideToMove === userColor ? cpFromSideToMove : -cpFromSideToMove;
-}
-
-function classifyCoachBucket({ cpl, evalBefore, evalAfter }) {
-  const isMateAgainstUser = evalAfter?.type === "mate" && Number.isFinite(evalAfter?.mate) && evalAfter.mate > 0;
-  const mateWorsened =
-    evalBefore?.type === "mate" &&
-    Number.isFinite(evalBefore?.mate) &&
-    evalBefore.mate > 0 &&
-    Number.isFinite(evalAfter?.mate) &&
-    evalAfter.mate > evalBefore.mate;
-
-  if (isMateAgainstUser || mateWorsened) return "horrendous";
-  if (cpl <= 5) return "amazing";
-  if (cpl <= 15) return "brilliant";
-  if (cpl <= 40) return "good";
-  if (cpl <= 90) return "meh";
-  if (cpl <= 150) return "bad";
-  if (cpl <= 250) return "awful";
-  return "horrendous";
-}
-
-function sideToMoveFromFen(fen) {
-  return fen.split(" ")[1] || "w";
-}
-
-function scoreFromUserPerspective(scoreObj, fen, youColor) {
-  return normalizeEval(scoreObj, sideToMoveFromFen(fen), youColor);
+function coachBucketFromGradeLabel(gradeLabel) {
+  return String(gradeLabel || "MEH").toLowerCase();
 }
 
 async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
@@ -648,15 +594,19 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
   let mateSeen = false;
 
   for (const snapshot of userMoveSnapshots) {
-    const before = await evaluatePosition(snapshot.fenBefore, movetimeMs);
-    const after = await evaluatePosition(snapshot.fenAfter, movetimeMs);
+    const moveLoss = await computeMoveLoss({
+      fenBefore: snapshot.fenBefore,
+      userMoveUciOrSan: moveToUci(snapshot.move),
+      userColor: youColor,
+      movetimeMsEval: movetimeMs,
+    });
 
-    if (before.type === "mate" || after.type === "mate") mateSeen = true;
-
-    const scoreBefore = scoreFromUserPerspective(before, snapshot.fenBefore, youColor);
-    const scoreAfter = scoreFromUserPerspective(after, snapshot.fenAfter, youColor);
-    const cpLoss = Math.max(0, Math.round(scoreBefore - scoreAfter));
+    const cpLoss = moveLoss.moveLossCp;
     const classification = classifyLoss(cpLoss);
+
+    if (moveLoss.evalAfterUser.userScoreCp <= -9600 || moveLoss.bestEvalBeforeUser.userScoreCp <= -9600) {
+      mateSeen = true;
+    }
 
     if (classification === "blunder") blunders += 1;
     else if (classification === "mistake") mistakes += 1;
@@ -666,8 +616,8 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
     moveBreakdown.push({
       move: moveToUci(snapshot.move),
       cpLoss,
-      scoreBefore,
-      scoreAfter,
+      scoreBefore: moveLoss.bestEvalBeforeUser.userScoreCp,
+      scoreAfter: moveLoss.evalAfterUser.userScoreCp,
       classification,
     });
   }
@@ -1053,33 +1003,34 @@ export default function App() {
     }));
 
     try {
-      const beforeEval = await evaluateFen(fenBefore, { movetimeMs: 90 });
-      const afterEval = await evaluateFen(fenAfter, { movetimeMs: 90 });
+      const moveLoss = await computeMoveLoss({
+        fenBefore,
+        userMoveUciOrSan: moveToUci(move),
+        userColor: youColor,
+        movetimeMsEval: 90,
+      });
 
-      const userEvalBefore = normalizeEval(beforeEval, sideToMoveFromFen(fenBefore), youColor);
-      const userEvalAfter = normalizeEval(afterEval, sideToMoveFromFen(fenAfter), youColor);
-      const cpl = Math.max(0, Math.round(userEvalBefore - userEvalAfter));
-      const bucket = classifyCoachBucket({ cpl, evalBefore: beforeEval, evalAfter: afterEval });
+      const cpl = moveLoss.moveLossCp;
+      const bucket = coachBucketFromGradeLabel(moveLoss.gradeLabel);
 
       const message = getCoachLine(bucket, { san: move.san, cpl, recentLines: recentCoachLines, roastMode });
       setCoachState({
         lastUserMove: move,
         cpl,
         bucket,
-        evalDelta: Math.round(userEvalAfter - userEvalBefore),
+        evalDelta: Math.round(moveLoss.evalAfterUser.userScoreCp - moveLoss.bestEvalBeforeUser.userScoreCp),
         message,
       });
       setCoachDebug({
         fenBefore,
-        fenAfter,
-        rawBefore: beforeEval,
-        rawAfter: afterEval,
-        userEvalBefore,
-        userEvalAfter,
-        cpl,
-        bucket,
+        fenAfter: moveLoss.evalAfterUser.fenUsed || fenAfter,
+        bestEvalBeforeUser: moveLoss.bestEvalBeforeUser.userScoreCp,
+        evalAfterUser: moveLoss.evalAfterUser.userScoreCp,
+        moveLossCp: cpl,
+        grade: moveLoss.gradeLabel,
       });
       setRecentCoachLines((prev) => [message.line, ...prev].slice(0, 3));
+      return moveLoss;
     } catch (error) {
       console.error("Coach evaluation failed", error);
       const message = getCoachLine("meh", { san: move.san, cpl: null, recentLines: recentCoachLines, roastMode });
@@ -1092,6 +1043,7 @@ export default function App() {
       });
       setCoachDebug({ fenBefore, fenAfter, error: error?.message || "Unknown coach eval error" });
       setRecentCoachLines((prev) => [message.line, ...prev].slice(0, 3));
+      return null;
     } finally {
       setCoachIsThinking(false);
     }
@@ -1129,7 +1081,7 @@ export default function App() {
           return;
         }
 
-        const loss = lossForMove(board, mv, turn, castle);
+        const loss = 0;
         const nextCastle = updateCastleRights(castle, board, mv);
 
         const nb = applyMove(board, mv);
@@ -1273,7 +1225,7 @@ export default function App() {
   }
 
 
-  function handleSquareClick(sq) {
+  async function handleSquareClick(sq) {
     if (result) return;
     if (turn !== youColor) return;
 
@@ -1303,7 +1255,6 @@ export default function App() {
       }
     }
 
-    const loss = lossForMove(board, candidate, turn, castle);
     const nextCastle = updateCastleRights(castle, board, candidate);
 
     const fenBefore = boardToFen(board, turn, castle, moves.length);
@@ -1316,7 +1267,8 @@ export default function App() {
     const sanMove = chessForSan.move({ from: candidate.from, to: candidate.to, promotion: candidate.promo || undefined });
     const moveForCoach = { ...candidate, san: sanMove?.san || formatMove(candidate) };
 
-    triggerCoachEvaluation({ fenBefore, fenAfter, move: moveForCoach });
+    const coachResult = await triggerCoachEvaluation({ fenBefore, fenAfter, move: moveForCoach });
+    const loss = Number.isFinite(coachResult?.moveLossCp) ? coachResult.moveLossCp : 0;
 
     setBoard(nb);
     setCastle(nextCastle);
@@ -1729,12 +1681,10 @@ Mode: <b>Rated</b>
                 <div className="font-semibold text-amber-100">Coach debug (?debug=1)</div>
                 <div className="text-amber-50/90 break-all">fenBefore: {coachDebug.fenBefore}</div>
                 <div className="text-amber-50/90 break-all">fenAfter: {coachDebug.fenAfter}</div>
-                <div className="text-amber-50/90">raw evalBefore: {JSON.stringify(coachDebug.rawBefore)}</div>
-                <div className="text-amber-50/90">raw evalAfter: {JSON.stringify(coachDebug.rawAfter)}</div>
-                <div className="text-amber-50/90">normalized before: {coachDebug.userEvalBefore ?? "--"}</div>
-                <div className="text-amber-50/90">normalized after: {coachDebug.userEvalAfter ?? "--"}</div>
-                <div className="text-amber-50/90">computed CPL: {coachDebug.cpl ?? "--"}</div>
-                <div className="text-amber-50/90">bucket: {coachDebug.bucket ?? "--"}</div>
+                <div className="text-amber-50/90">bestEvalBeforeUser: {coachDebug.bestEvalBeforeUser ?? "--"}</div>
+                <div className="text-amber-50/90">evalAfterUser: {coachDebug.evalAfterUser ?? "--"}</div>
+                <div className="text-amber-50/90">moveLossCp: {coachDebug.moveLossCp ?? "--"}</div>
+                <div className="text-amber-50/90">grade: {coachDebug.grade ?? "--"}</div>
                 {coachDebug.error ? <div className="text-rose-200">error: {coachDebug.error}</div> : null}
               </div>
             ) : null}
@@ -1772,7 +1722,7 @@ Mode: <b>Rated</b>
 
           {/* Sidebar */}
           <div className="lg:col-span-1">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sticky top-6 space-y-4">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 sticky top-6">
               <div className="hidden lg:block">
                 <CoachRoast
                   lastUserMove={coachState.lastUserMove}
@@ -1784,30 +1734,6 @@ Mode: <b>Rated</b>
                   onToggleRoastMode={() => setRoastMode((prev) => !prev)}
                   coachMessage={coachState.message}
                 />
-              </div>
-
-              <div className="p-4 rounded-2xl bg-neutral-950/40 border border-white/10">
-                <div className="text-sm text-neutral-200 font-medium">Elo encouragement</div>
-                <div className="text-xs text-neutral-400 mt-1">
-                  {yourSummary.blunders === 0 && yourSummary.movesPlayed >= 8
-                    ? "No blunders so far. You’re piloting a clean game."
-                    : yourSummary.avgLoss < 70
-                    ? "Strong accuracy. Your next jump is in endgame technique."
-                    : "Focus on one move quality: avoid hanging pieces and you’ll climb fast."}
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-neutral-950/40 border border-white/10">
-                <div className="text-sm text-neutral-200 font-medium">How it works</div>
-                <ol className="text-xs text-neutral-400 mt-2 space-y-1 list-decimal list-inside">
-                  <li>Play rated games against an adaptive hidden-strength bot.</li>
-                  <li>Each result updates your Elo estimate and uncertainty.</li>
-                  <li>Keep playing to refine confidence over time.</li>
-                </ol>
-              </div>
-
-              <div className="text-xs text-neutral-500">
-                Estimate is local to this browser and improves with more rated games.
               </div>
             </div>
           </div>
