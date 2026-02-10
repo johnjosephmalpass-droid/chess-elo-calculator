@@ -73,7 +73,7 @@ export async function initEngine() {
 
   initPromise = new Promise((resolve, reject) => {
     try {
-      worker = new Worker(new URL("./stockfish.worker.js", import.meta.url), { type: "module" });
+      worker = new Worker("/stockfish/stockfish.worker.js");
     } catch (error) {
       reject(new Error(`Failed to create Stockfish worker: ${error?.message || error}`));
       return;
@@ -177,10 +177,15 @@ export async function runSelfTest() {
     throw new Error("Stockfish is busy running another search");
   }
 
+  post("uci");
+  await waitForLine((line) => line === "uciok", 10000, "Stockfish self-test timed out waiting for uciok");
+
+  post("isready");
+  await waitForLine((line) => line === "readyok", 10000, "Stockfish self-test timed out waiting for readyok");
+
   return new Promise((resolve, reject) => {
     activeSearch = { resolve, reject };
 
-    post("ucinewgame");
     post("position startpos");
     post("go depth 8");
 
