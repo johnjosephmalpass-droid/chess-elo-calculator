@@ -318,11 +318,11 @@ export function chooseBotElo(ratingState) {
   const baseElo = Number.isFinite(ratingState?.playerElo) ? ratingState.playerElo : DEFAULT_ELO;
 
   // Adaptive hidden opponent: from game 2 onward mirror the current estimate.
-  return clamp(Math.round(baseElo), 600, 2600);
+  return clamp(Math.round(baseElo), MIN_ELO, MAX_ELO);
 }
 
 export function mapMovetimeFromElo(botElo) {
-  const clamped = clamp(botElo, 600, 2600);
-  const ratio = (clamped - 600) / (2600 - 600);
+  const clamped = clamp(botElo, MIN_ELO, MAX_ELO);
+  const ratio = (clamped - MIN_ELO) / (MAX_ELO - MIN_ELO);
   return Math.round(80 + ratio * (450 - 80));
 }
