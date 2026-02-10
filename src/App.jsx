@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import CoachFeedback from "./CoachFeedback";
 import { evaluatePosition, getBestMove, getBestMoveStyled, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
 import {
@@ -972,6 +972,7 @@ export default function App() {
   const [lastMove, setLastMove] = useState(null);
   const [botGlowSquare, setBotGlowSquare] = useState(null);
   const [checkedKingSquare, setCheckedKingSquare] = useState(null);
+  const isMountedRef = useRef(true);
 
   // castling rights
   const [castle, setCastle] = useState({ wK: true, wQ: true, bK: true, bQ: true });
@@ -1055,11 +1056,15 @@ export default function App() {
   }, [personalityId, personality]);
 
   useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (analysisQueueBusy || result) return;
     const pendingMove = moves.find((m) => m.side === youColor && m.pendingAnalysis);
     if (!pendingMove) return;
-
-    let cancelled = false;
     setAnalysisQueueBusy(true);
 
     const runAnalysis = async () => {
@@ -1073,7 +1078,7 @@ export default function App() {
               : m,
           ),
         );
-        setAnalysisQueueBusy(false);
+        if (isMountedRef.current) setAnalysisQueueBusy(false);
         return;
       }
 
@@ -1085,7 +1090,6 @@ export default function App() {
           castleBefore,
           pendingMove.plyBefore,
         );
-        if (cancelled) return;
 
         setMoves((prev) =>
           prev.map((m) =>
@@ -1102,19 +1106,14 @@ export default function App() {
           ),
         );
       } catch (error) {
-        if (cancelled) return;
         console.error("Live move analysis failed", error);
         setMoves((prev) => prev.map((m) => (m.id === pendingMove.id ? { ...m, pendingAnalysis: false } : m)));
       } finally {
-        if (!cancelled) setAnalysisQueueBusy(false);
+        if (isMountedRef.current) setAnalysisQueueBusy(false);
       }
     };
 
     runAnalysis();
-
-    return () => {
-      cancelled = true;
-    };
   }, [analysisQueueBusy, moves, youColor, result]);
 
   async function handleSelfTest() {
