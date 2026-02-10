@@ -608,6 +608,7 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
       accuracy: 100,
       moveBreakdown: [],
       mateSeen: false,
+      catastrophicErrors: 0,
       endedQuickly: true,
     };
   }
@@ -621,6 +622,7 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
   let excellentMoves = 0;
   let bestMoves = 0;
   let mateSeen = false;
+  let catastrophicErrors = 0;
 
   for (const snapshot of userMoveSnapshots) {
     const before = await evaluatePosition(snapshot.fenBefore, movetimeMs);
@@ -652,6 +654,8 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
 
     if (classification === "blunder") blunders += 1;
     else if (classification === "mistake") mistakes += 1;
+
+    if (cpLoss >= 500) catastrophicErrors += 1;
     else if (classification === "inaccuracy") inaccuracies += 1;
     else if (classification === "good") goodMoves += 1;
     else if (classification === "excellent") excellentMoves += 1;
@@ -688,6 +692,7 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
     accuracy,
     moveBreakdown,
     mateSeen,
+    catastrophicErrors,
     endedQuickly: selectedMoves.length < 20,
   };
 }
@@ -1104,6 +1109,7 @@ export default function App() {
         accuracy: 50,
         moveBreakdown: [],
         mateSeen: false,
+        catastrophicErrors: 0,
         endedQuickly: true,
       };
     });

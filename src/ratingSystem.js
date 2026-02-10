@@ -1,4 +1,5 @@
-const DEFAULT_ELO = 1200;
+const CALIBRATION_BOT_ELO = 1000;
+const DEFAULT_ELO = CALIBRATION_BOT_ELO;
 const MIN_ELO = 200;
 const MAX_ELO = 2800;
 
@@ -88,14 +89,16 @@ function getResultScore(gameResult) {
 }
 
 function getResultAdjustment(gameResult) {
-  if (gameResult === "win") return 120;
-  if (gameResult === "loss") return -120;
+  if (gameResult === "win") return 140;
+  if (gameResult === "loss") return -140;
   return 0;
 }
 
 function getRangeFromGames(gamesRated) {
-  if (gamesRated < 5) return 200;
-  if (gamesRated < 10) return 140;
+  if (gamesRated < 1) return 260;
+  if (gamesRated < 3) return 220;
+  if (gamesRated < 5) return 180;
+  if (gamesRated < 10) return 130;
   if (gamesRated < 20) return 90;
   return 60;
 }
@@ -126,25 +129,38 @@ export function getInitialRatingState() {
     rangeLow: DEFAULT_ELO - uncertainty,
     rangeHigh: DEFAULT_ELO + uncertainty,
     confidence: getConfidenceLabel(0),
-    lastOpponentElo: DEFAULT_ELO,
+    lastOpponentElo: CALIBRATION_BOT_ELO,
     lastGameSummary: null,
   };
 }
 
 function getKFactor(gamesRated) {
-  if (gamesRated < 5) return 40;
-  if (gamesRated < 20) return 20;
+  if (gamesRated < 1) return 50;
+  if (gamesRated < 3) return 38;
+  if (gamesRated < 10) return 24;
+  if (gamesRated < 20) return 18;
   return 12;
 }
 
 function getAlpha(gamesRated) {
-  return clamp(0.78 - 0.08 * gamesRated, 0.22, 0.78);
+  return clamp(0.88 - 0.07 * gamesRated, 0.26, 0.88);
 }
 
 function getMaxSwing(gamesRated) {
-  if (gamesRated < 5) return 400;
-  if (gamesRated < 20) return 200;
+  if (gamesRated < 1) return 700;
+  if (gamesRated < 2) return 420;
+  if (gamesRated < 5) return 280;
+  if (gamesRated < 15) return 180;
   return 120;
+}
+
+function getCatastrophicPenalty({ catastrophicErrors = 0, blunders = 0, mateSeen = false, endedQuickly = false, result }) {
+  let penalty = Math.max(0, catastrophicErrors) * 110;
+
+  if (Math.max(0, blunders) >= 3) penalty += 90;
+  if (mateSeen && result === "loss") penalty += endedQuickly ? 90 : 45;
+
+  return -Math.min(360, penalty);
 }
 
 export function estimatePerformanceElo({
@@ -161,6 +177,7 @@ export function estimatePerformanceElo({
   movesAnalyzed = 0,
   endedQuickly = false,
   mateSeen = false,
+  catastrophicErrors,
 }) {
   const base = Number.isFinite(opponentElo) ? opponentElo : DEFAULT_ELO;
   const resultAdjustment = getResultAdjustment(result);
@@ -180,6 +197,13 @@ export function estimatePerformanceElo({
   const mistakePenalty = -Math.min(240, Math.max(0, mistakes) * 60);
   const inaccuracyPenalty = -Math.min(120, Math.max(0, inaccuracies) * 20);
   const lowAccuracyExtraPenalty = Number.isFinite(accuracy) && accuracy < 60 ? -Math.round((60 - accuracy) * 8) : 0;
+  const catastrophicPenalty = getCatastrophicPenalty({
+    catastrophicErrors,
+    blunders,
+    mateSeen,
+    endedQuickly,
+    result,
+  });
 
   const rawPerformance =
     base +
@@ -191,7 +215,8 @@ export function estimatePerformanceElo({
     blunderPenalty +
     mistakePenalty +
     inaccuracyPenalty +
-    lowAccuracyExtraPenalty;
+    lowAccuracyExtraPenalty +
+    catastrophicPenalty;
   const performanceElo = clamp(Math.round(rawPerformance), MIN_ELO, MAX_ELO);
 
   const baseRange = getRangeFromGames(0);
@@ -215,6 +240,7 @@ export function estimatePerformanceElo({
       mistakePenalty,
       inaccuracyPenalty,
       lowAccuracyExtraPenalty,
+      catastrophicPenalty,
     },
   };
 }
@@ -223,15 +249,16 @@ export function updatePlayerElo(ratingState, opponentElo, gameResult, analysisSu
   const currentElo = Number.isFinite(ratingState?.playerElo) ? ratingState.playerElo : DEFAULT_ELO;
   const gamesRated = Number.isFinite(ratingState?.gamesRated) ? ratingState.gamesRated : 0;
 
+  const safeOpponentElo = Number.isFinite(opponentElo) ? opponentElo : CALIBRATION_BOT_ELO;
   const actualScore = getResultScore(gameResult);
-  const expectedScore = 1 / (1 + 10 ** ((opponentElo - currentElo) / 400));
+  const expectedScore = 1 / (1 + 10 ** ((safeOpponentElo - currentElo) / 400));
   const kFactor = getKFactor(gamesRated);
   const eloAfterClassic = Math.round(currentElo + kFactor * (actualScore - expectedScore));
 
   const perf = estimatePerformanceElo({
     ...analysisSummary,
     result: gameResult,
-    opponentElo,
+    opponentElo: safeOpponentElo,
   });
 
   const alpha = getAlpha(gamesRated);
@@ -255,7 +282,7 @@ export function updatePlayerElo(ratingState, opponentElo, gameResult, analysisSu
       rangeLow: clamp(playerElo - uncertainty, MIN_ELO, MAX_ELO),
       rangeHigh: clamp(playerElo + uncertainty, MIN_ELO, MAX_ELO),
       confidence: getConfidenceLabel(nextGamesRated),
-      lastOpponentElo: opponentElo,
+      lastOpponentElo: safeOpponentElo,
       lastGameSummary: {
         ...(analysisSummary || {}),
         result: gameResult,
@@ -281,38 +308,17 @@ export function updatePlayerElo(ratingState, opponentElo, gameResult, analysisSu
   };
 }
 
-export function chooseBotElo(ratingState, lastGameSummary) {
+export function chooseBotElo(ratingState) {
   const gamesRated = ratingState?.gamesRated || 0;
 
   if (gamesRated === 0) {
-    return DEFAULT_ELO;
+    return CALIBRATION_BOT_ELO;
   }
 
   const baseElo = Number.isFinite(ratingState?.playerElo) ? ratingState.playerElo : DEFAULT_ELO;
 
-  if (gamesRated < 5) {
-    let adjustmentFromLastResult = 0;
-    if (lastGameSummary?.result === "win") adjustmentFromLastResult = 120;
-    if (lastGameSummary?.result === "loss") adjustmentFromLastResult = -120;
-
-    let candidate = Math.round(baseElo + adjustmentFromLastResult);
-
-    if (Number.isFinite(lastGameSummary?.performanceElo)) {
-      const gap = lastGameSummary.performanceElo - (ratingState?.lastOpponentElo || DEFAULT_ELO);
-      if (gap >= 220) candidate += 250;
-      if (gap <= -220) candidate -= 250;
-    }
-
-    return clamp(candidate, 600, 2600);
-  }
-
-  const probeGame = Math.random() < 0.2;
-  if (probeGame) {
-    return clamp(Math.round(baseElo + 160), 600, 2600);
-  }
-
-  const jitter = Math.round(Math.random() * 160 - 80);
-  return clamp(Math.round(baseElo + jitter), 600, 2600);
+  // Adaptive hidden opponent: from game 2 onward mirror the current estimate.
+  return clamp(Math.round(baseElo), 600, 2600);
 }
 
 export function mapMovetimeFromElo(botElo) {
