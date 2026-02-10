@@ -918,7 +918,7 @@ export default function App() {
 
       try {
         const fen = boardToFen(board, turn, castle, moves.length);
-        const uci = await getBestMove(fen, 350);
+        const uci = await getBestMove(fen, 250);
         if (cancelled) return;
 
         const parsed = parseUciMove(uci);
@@ -953,6 +953,7 @@ export default function App() {
         else setStatus(`Your move (${colorToMoveName(youColor)})`);
       } catch (error) {
         console.error("Bot move failed", error);
+        setStatus(`Bot engine error: ${error?.message || "Unable to compute move."}`);
       }
     };
 
