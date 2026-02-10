@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachFeedback from "./CoachFeedback";
-import { evaluatePosition, getBestMoveStyled, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
+import { evaluatePosition, getBestMove, getBestMoveStyled, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
 import {
   chooseBotElo,
   getConfidenceLabel,
@@ -21,7 +21,8 @@ import { Chess } from "chess.js";
 
 const FILES = "abcdefgh";
 const RANKS = "12345678";
-const LIVE_ANALYSIS_MOVETIME_MS = 120;
+const LIVE_ANALYSIS_MOVETIME_MS = 70;
+const POST_GAME_ANALYSIS_MOVETIME_MS = 80;
 
 
 function sqToIdx(sq) {
@@ -512,7 +513,7 @@ async function stockfishLossForMove(boardBefore, mv, side, castle, plyCount, thi
   if (!legal.length) return { cpLoss: 0, classification: "best" };
 
   const fenBefore = boardToFen(boardBefore, side, castle, plyCount);
-  const bestUci = await getBestMoveStyled(fenBefore, "endgame-grinder", thinkMs);
+  const bestUci = await getBestMove(fenBefore, thinkMs);
   const bestParsed = parseUciMove(bestUci);
 
   const matchedBest = bestParsed
@@ -685,7 +686,7 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
 
   for (const snapshot of userMoveSnapshots) {
     const before = await evaluatePosition(snapshot.fenBefore, movetimeMs);
-    const bestMoveUci = await getBestMoveStyled(snapshot.fenBefore, "endgame-grinder", movetimeMs);
+    const bestMoveUci = await getBestMove(snapshot.fenBefore, movetimeMs);
 
     const bestChess = new Chess(snapshot.fenBefore);
     const bestMove = parseUciMove(bestMoveUci);
@@ -1216,7 +1217,7 @@ export default function App() {
     const analysisSummary = await analyzeGameWithStockfish({
       moves: movesForGame,
       youColor,
-      movetimeMs: 100,
+      movetimeMs: POST_GAME_ANALYSIS_MOVETIME_MS,
     }).catch((error) => {
       console.error("Post-game analysis failed", error);
       return {
