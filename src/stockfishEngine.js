@@ -428,6 +428,14 @@ export async function evaluatePosition(fen, thinkMs = 100) {
   });
 }
 
+export async function evaluateFen(fen, { movetimeMs = 100 } = {}) {
+  const score = await evaluatePosition(fen, movetimeMs);
+  if (score?.type === "mate") {
+    return { type: "mate", mate: score.value, cp: score.cp };
+  }
+  return { type: "cp", cp: score?.cp ?? 0 };
+}
+
 export async function runSelfTest() {
   const startFen = "rn1qkbnr/pppb1ppp/3pp3/8/3PP3/2N2N2/PPP2PPP/R1BQKB1R w KQkq - 0 5";
   return getBestMove(startFen, DEFAULT_MOVE_TIME_MS);

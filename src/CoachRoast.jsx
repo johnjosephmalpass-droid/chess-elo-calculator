@@ -2,13 +2,23 @@ import React from "react";
 import { getCoachLine } from "./coachRoastLines";
 
 const badgeTone = {
-  Brilliant: "bg-emerald-400/20 text-emerald-100 border-emerald-200/30",
-  Great: "bg-green-400/20 text-green-100 border-green-200/30",
-  Good: "bg-sky-400/20 text-sky-100 border-sky-200/30",
-  Meh: "bg-neutral-400/20 text-neutral-100 border-neutral-200/30",
-  Inaccuracy: "bg-amber-400/20 text-amber-100 border-amber-200/30",
-  Mistake: "bg-orange-500/20 text-orange-100 border-orange-200/30",
-  Blunder: "bg-rose-500/20 text-rose-100 border-rose-200/30",
+  AMAZING: "bg-emerald-400/20 text-emerald-100 border-emerald-200/30",
+  BRILLIANT: "bg-green-400/20 text-green-100 border-green-200/30",
+  GOOD: "bg-sky-400/20 text-sky-100 border-sky-200/30",
+  MEH: "bg-neutral-400/20 text-neutral-100 border-neutral-200/30",
+  BAD: "bg-amber-400/20 text-amber-100 border-amber-200/30",
+  AWFUL: "bg-orange-500/20 text-orange-100 border-orange-200/30",
+  HORRENDOUS: "bg-rose-500/20 text-rose-100 border-rose-200/30",
+};
+
+const BUCKET_TO_LABEL = {
+  amazing: "AMAZING",
+  brilliant: "BRILLIANT",
+  good: "GOOD",
+  meh: "MEH",
+  bad: "BAD",
+  awful: "AWFUL",
+  horrendous: "HORRENDOUS",
 };
 
 export default function CoachRoast({
@@ -22,7 +32,7 @@ export default function CoachRoast({
   coachMessage,
 }) {
   const fallback = getCoachLine("thinking");
-  const gradeLabel = bucket ? `${bucket.charAt(0).toUpperCase()}${bucket.slice(1)}` : "Meh";
+  const gradeLabel = BUCKET_TO_LABEL[bucket] || "MEH";
 
   return (
     <div className="rounded-2xl border border-white/10 bg-neutral-950/45 p-4 shadow-lg space-y-4">
@@ -40,10 +50,10 @@ export default function CoachRoast({
       </div>
 
       <div className="flex items-center gap-2">
-        <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${badgeTone[gradeLabel] || badgeTone.Meh}`}>
-          {isThinking ? "Evaluating…" : gradeLabel}
+        <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${badgeTone[gradeLabel] || badgeTone.MEH}`}>
+          {isThinking ? "Coach is thinking…" : gradeLabel}
         </span>
-        <span className="text-xs text-neutral-400">{cpl === null ? "--" : `${Math.round(cpl)} CPL`}</span>
+        <span className="text-xs text-neutral-400">{cpl === null ? "Move loss: --" : `Move loss: ${Math.round(cpl)} cp`}</span>
       </div>
 
       <div className="rounded-xl bg-black/20 border border-white/10 p-4">
