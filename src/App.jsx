@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachFeedback from "./CoachFeedback";
-import { getBestMove, initEngine, setStrength } from "./stockfishEngine";
+import { getBestMove, initEngine, setStrength } from "./stockfishEngine.js";
+
 
 /**
  * Chess Elo Calculator (polished + castling + flipped board)
