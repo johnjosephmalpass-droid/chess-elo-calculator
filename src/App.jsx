@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachFeedback from "./CoachFeedback";
-import { getBestMove, initEngine, setStrength } from "./stockfishEngine.js";
+import { getBestMove, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
 
 
 /**
@@ -798,6 +798,9 @@ export default function App() {
   const [botPlays, setBotPlays] = useState("b");
   const [botStrength, setBotStrength] = useState(60);
   const [botPersonality, setBotPersonality] = useState("strategist");
+  const [selfTestResult, setSelfTestResult] = useState("");
+  const [selfTestError, setSelfTestError] = useState("");
+  const [selfTestBusy, setSelfTestBusy] = useState(false);
   const [themeId, setThemeId] = useState("nebula");
   const [moves, setMoves] = useState([]); // {from,to,promo,side,loss}
   const [result, setResult] = useState(null);
@@ -883,6 +886,23 @@ export default function App() {
     const conf = Math.round(history.reduce((a, h) => a + h.conf, 0) / history.length);
     return { mean, conf, n: history.length };
   }, [history]);
+
+  async function handleSelfTest() {
+    setSelfTestBusy(true);
+    setSelfTestResult("");
+    setSelfTestError("");
+    try {
+      const bestmove = await runSelfTest();
+      if (!bestmove || !/^[a-h][1-8][a-h][1-8][qrbn]?$/i.test(bestmove)) {
+        throw new Error(`Stockfish self-test returned invalid bestmove: ${bestmove || "(empty)"}`);
+      }
+      setSelfTestResult(`bestmove ${bestmove}`);
+    } catch (error) {
+      setSelfTestError(error?.message || "Stockfish self-test failed to produce a bestmove.");
+    } finally {
+      setSelfTestBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (result) return;
@@ -1327,6 +1347,22 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4 md:col-span-2">
+                  <div className="text-xs uppercase tracking-wide text-neutral-400">Stockfish self-test</div>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={handleSelfTest}
+                      disabled={selfTestBusy}
+                      className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-medium transition hover:bg-white/10 disabled:opacity-60"
+                    >
+                      {selfTestBusy ? "Running self-test…" : "Run Stockfish self-test"}
+                    </button>
+                    {selfTestResult ? <span className="text-sm text-emerald-300">{selfTestResult}</span> : null}
+                  </div>
+                  {selfTestError ? <div className="mt-2 text-sm font-medium text-rose-300">{selfTestError}</div> : null}
+                  <div className="mt-2 text-xs text-neutral-400">Runs: position startpos → go depth 8.</div>
                 </div>
               </div>
             </div>
