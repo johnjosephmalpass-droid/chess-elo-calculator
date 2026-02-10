@@ -24,11 +24,13 @@ function getQualityAdjustment(acpl) {
   if (acpl <= 60) return 50;
   if (acpl <= 90) return -75;
   if (acpl <= 130) return -200;
-  return -400;
+  if (acpl <= 180) return -500;
+  if (acpl <= 260) return -700;
+  return -900;
 }
 
 function getUncertainty(gamesRated) {
-  if (gamesRated < 5) return 200;
+  if (gamesRated < 5) return 250;
   if (gamesRated < 15) return 140;
   return 90;
 }
@@ -69,37 +71,46 @@ export function summarizeCpl(cplList = []) {
   const movesAnalyzed = list.length;
   const acpl = movesAnalyzed ? Math.round(total / movesAnalyzed) : 0;
   const blunders = list.filter((value) => value >= 300).length;
-  const mistakes = list.filter((value) => value >= 150).length;
-  const inaccuracies = list.filter((value) => value >= 50).length;
+  const mistakes = list.filter((value) => value >= 150 && value < 300).length;
+  const inaccuracies = list.filter((value) => value >= 50 && value < 150).length;
+  const maxCpl = list.length ? Math.max(...list) : 0;
 
-  return { movesAnalyzed, acpl, blunders, mistakes, inaccuracies, cplList: list };
+  return { movesAnalyzed, acpl, blunders, mistakes, inaccuracies, maxCpl, cplList: list };
 }
 
-export function computePerformanceElo({ opponentElo, result, acpl, blunders, mistakes }) {
+export function computePerformanceElo({ opponentElo, result, acpl, blunders, mistakes, maxCpl, gamesRated = 0, catastrophicCount = 0 }) {
   const base = Number.isFinite(opponentElo) ? opponentElo : DEFAULT_ELO;
   const resultAdj = getResultAdjustment(result);
   const qualityAdj = getQualityAdjustment(acpl);
-  const blunderPenalty = -Math.min(360, Math.max(0, blunders) * 120);
-  const mistakePenalty = -Math.min(240, Math.max(0, mistakes) * 60);
+  const isEarly = gamesRated < 5;
+  const blunderPenalty = -Math.min(isEarly ? 720 : 360, Math.max(0, blunders) * (isEarly ? 180 : 120));
+  const mistakePenalty = -Math.min(isEarly ? 360 : 240, Math.max(0, mistakes) * (isEarly ? 90 : 60));
+  const catastrophicPenalty = isEarly && (maxCpl >= 800 || catastrophicCount > 0) ? -250 : 0;
 
-  return clamp(base + resultAdj + qualityAdj + blunderPenalty + mistakePenalty, MIN_ELO, MAX_ELO);
+  return clamp(base + resultAdj + qualityAdj + blunderPenalty + mistakePenalty + catastrophicPenalty, MIN_ELO, MAX_ELO);
 }
 
-export function applyGameResult(ratingState, { opponentElo, result, cplList }) {
+export function applyGameResult(ratingState, { opponentElo, result, cplList, moveBreakdown = [] }) {
   const current = Number.isFinite(ratingState?.playerElo) ? ratingState.playerElo : DEFAULT_ELO;
   const gamesRated = Number.isFinite(ratingState?.gamesRated) ? ratingState.gamesRated : 0;
   const metrics = summarizeCpl(cplList);
+  const catastrophicCount = moveBreakdown.filter((entry) => entry?.catastrophicByMaterial).length;
   const performanceElo = computePerformanceElo({
     opponentElo,
     result,
     acpl: metrics.acpl,
     blunders: metrics.blunders,
     mistakes: metrics.mistakes,
+    maxCpl: metrics.maxCpl,
+    gamesRated,
+    catastrophicCount,
   });
+  const firstGameFloorTriggered = gamesRated === 0 && (metrics.acpl > 180 || metrics.blunders >= 3);
+  const boundedPerformanceElo = firstGameFloorTriggered ? Math.min(performanceElo, 700) : performanceElo;
 
   const alpha = clamp(0.6 - 0.06 * gamesRated, 0.12, 0.6);
   let blended =
-    gamesRated === 0 ? Math.round(performanceElo) : Math.round((1 - alpha) * current + alpha * performanceElo);
+    gamesRated === 0 ? Math.round(boundedPerformanceElo) : Math.round((1 - alpha) * current + alpha * boundedPerformanceElo);
 
   const actualScore = getResultScore(result);
   const expectedScore = 1 / (1 + 10 ** ((opponentElo - current) / 400));
@@ -124,7 +135,9 @@ export function applyGameResult(ratingState, { opponentElo, result, cplList }) {
     lastGameSummary: {
       opponentElo,
       result,
-      performanceElo: Math.round(performanceElo),
+      performanceElo: Math.round(boundedPerformanceElo),
+      catastrophicCount,
+      firstGameFloorTriggered,
       ...metrics,
     },
   };
@@ -135,7 +148,9 @@ export function applyGameResult(ratingState, { opponentElo, result, cplList }) {
       opponentElo,
       playerEloBefore: current,
       playerEloAfter: playerElo,
-      performanceElo: Math.round(performanceElo),
+      performanceElo: Math.round(boundedPerformanceElo),
+      catastrophicCount,
+      firstGameFloorTriggered,
       uncertainty,
       confidence,
       alpha,
