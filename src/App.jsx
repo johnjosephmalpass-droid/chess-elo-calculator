@@ -9,6 +9,7 @@ import {
   mapMovetimeFromElo,
   updatePlayerElo,
 } from "./ratingSystem.js";
+import { RATING_STORAGE_KEY, resetCalibrationStorage } from "./storage/resetCalibration.js";
 import { Chess } from "chess.js";
 
 
@@ -672,7 +673,6 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
   };
 }
 
-const RATING_STORAGE_KEY = "chess-elo-calculator:rating-state";
 const PERSONALITY_STORAGE_KEY = "chess-elo-calculator:bot-personality";
 const ROAST_MODE_STORAGE_KEY = "chess-elo-calculator:roast-mode";
 
@@ -897,6 +897,8 @@ export default function App() {
   });
   const [coachIsThinking, setCoachIsThinking] = useState(false);
   const [recentCoachLines, setRecentCoachLines] = useState([]);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
 
   // castling rights
   const [castle, setCastle] = useState({ wK: true, wQ: true, bK: true, bQ: true });
@@ -985,6 +987,12 @@ export default function App() {
     const timer = setTimeout(() => setBotGlowSquare(null), 300);
     return () => clearTimeout(timer);
   }, [botGlowSquare]);
+
+  useEffect(() => {
+    if (!toastMessage) return undefined;
+    const timer = setTimeout(() => setToastMessage(""), 2200);
+    return () => clearTimeout(timer);
+  }, [toastMessage]);
 
   useEffect(() => {
     if (!coachState.lastUserMove || coachIsThinking) return;
@@ -1206,6 +1214,28 @@ export default function App() {
     });
   }
 
+  function resetCalibration() {
+    const freshRatingState = getInitialRatingState();
+    resetCalibrationStorage();
+    setRatingState(freshRatingState);
+    setLastGameSummaryForBot(null);
+    setLastRatedSummary(null);
+    setDebugInfo(null);
+    setBotEloUsedThisGame(1200);
+    setCurrentMoveTimeMs(mapMovetimeFromElo(1200));
+    reset();
+    setCoachState({
+      lastUserMove: null,
+      cpl: null,
+      bucket: "meh",
+      evalDelta: null,
+      message: "Let’s calibrate.",
+    });
+    setStatus("Calibrating… Play 5 rated games…");
+    setShowResetModal(false);
+    setToastMessage("Calibration reset. Starting fresh.");
+  }
+
 
   function handleSquareClick(sq) {
     if (result) return;
@@ -1337,10 +1367,19 @@ Mode: <b>Rated</b>
                 >
                   New game
                 </button>
+                <button
+                  onClick={() => setShowResetModal(true)}
+                  className="px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/15 border border-rose-300/20 text-rose-100 text-sm transition"
+                >
+                  Reset
+                </button>
               </div>
             </div>
 
             <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4">
+              <div className="text-sm text-sky-100 font-medium">
+                {ratingState.gamesRated < 5 ? "Calibrating… Play 5 rated games…" : "Calibration active"}
+              </div>
               <div className="text-sm sm:text-base font-medium text-sky-100">Range: {ratingState.rangeLow}–{ratingState.rangeHigh}</div>
               <div className="text-xs text-sky-200/90 mt-1">Confidence: {ratingState.confidence}</div>
               {lastRatedSummary ? (
@@ -1700,6 +1739,37 @@ Mode: <b>Rated</b>
           </div>
         </div>
       </div>
+
+      {toastMessage ? (
+        <div className="fixed top-4 right-4 z-50 rounded-xl border border-emerald-300/30 bg-emerald-500/15 px-4 py-2 text-sm text-emerald-100 shadow-lg">
+          {toastMessage}
+        </div>
+      ) : null}
+
+      {showResetModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/15 bg-neutral-950 p-5 shadow-2xl">
+            <h3 className="text-lg font-semibold text-white">Reset calibration?</h3>
+            <p className="mt-2 text-sm text-neutral-300">
+              This clears your local Elo estimate and history on this device.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setShowResetModal(false)}
+                className="px-3 py-2 rounded-lg border border-white/15 bg-white/5 text-sm text-neutral-100 hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={resetCalibration}
+                className="px-3 py-2 rounded-lg border border-rose-300/30 bg-rose-500/20 text-sm text-rose-100 hover:bg-rose-500/30"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
