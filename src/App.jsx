@@ -1,15 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachRoast from "./CoachRoast";
 import { getBestMoveStyled, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
-import { computeMoveLoss } from "./engine/stockfishEval.js";
+import { computeMoveLossVsBest } from "./rating/evalEngine.js";
 import { getCoachLine } from "./coachRoastLines";
 import {
-  chooseBotElo,
-  getConfidenceLabel,
+  applyGameResult,
+  chooseOpponentElo,
   getInitialRatingState,
   mapMovetimeFromElo,
-  updatePlayerElo,
-} from "./ratingSystem.js";
+} from "./rating/ratingEngine.js";
 import { RATING_STORAGE_KEY, resetCalibrationStorage } from "./storage/resetCalibration.js";
 import { Chess } from "chess.js";
 
@@ -557,85 +556,37 @@ function coachBucketFromGradeLabel(gradeLabel) {
 
 async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
   const chess = new Chess();
-  const maxPlies = 40;
-  const selectedMoves = moves.slice(0, maxPlies);
-
   const userMoveSnapshots = [];
 
-  for (const move of selectedMoves) {
+  for (const move of moves) {
     const fenBefore = chess.fen();
     const parsed = chess.move({ from: move.from, to: move.to, promotion: move.promo || undefined });
     if (!parsed) continue;
-    const fenAfter = chess.fen();
     if (move.side === youColor) {
-      userMoveSnapshots.push({ move, fenBefore, fenAfter });
+      userMoveSnapshots.push({ move, fenBefore });
     }
   }
 
-  if (!userMoveSnapshots.length) {
-    return {
-      movesAnalyzed: 0,
-      acpl: 0,
-      blunders: 0,
-      mistakes: 0,
-      inaccuracies: 0,
-      accuracy: 100,
-      moveBreakdown: [],
-      mateSeen: false,
-      endedQuickly: true,
-    };
-  }
-
+  const cplList = [];
   const moveBreakdown = [];
-  let totalLoss = 0;
-  let blunders = 0;
-  let mistakes = 0;
-  let inaccuracies = 0;
-  let mateSeen = false;
 
   for (const snapshot of userMoveSnapshots) {
-    const moveLoss = await computeMoveLoss({
-      fenBefore: snapshot.fenBefore,
-      userMoveUciOrSan: moveToUci(snapshot.move),
-      userColor: youColor,
-      movetimeMsEval: movetimeMs,
-    });
-
+    const moveLoss = await computeMoveLossVsBest(snapshot.fenBefore, moveToUci(snapshot.move), youColor, movetimeMs);
     const cpLoss = moveLoss.moveLossCp;
-    const classification = classifyLoss(cpLoss);
-
-    if (moveLoss.evalAfterUser.userScoreCp <= -9600 || moveLoss.bestEvalBeforeUser.userScoreCp <= -9600) {
-      mateSeen = true;
-    }
-
-    if (classification === "blunder") blunders += 1;
-    else if (classification === "mistake") mistakes += 1;
-    else if (classification === "inaccuracy") inaccuracies += 1;
-
-    totalLoss += cpLoss;
+    cplList.push(cpLoss);
     moveBreakdown.push({
       move: moveToUci(snapshot.move),
       cpLoss,
-      scoreBefore: moveLoss.bestEvalBeforeUser.userScoreCp,
-      scoreAfter: moveLoss.evalAfterUser.userScoreCp,
-      classification,
+      bestBeforeCp: moveLoss.bestBeforeCp,
+      afterCp: moveLoss.afterCp,
+      classification: classifyLoss(cpLoss),
+      grade: moveLoss.grade,
     });
   }
 
-  const movesAnalyzed = moveBreakdown.length;
-  const acpl = movesAnalyzed ? Math.round(totalLoss / movesAnalyzed) : 0;
-  const accuracy = clamp(Math.round(100 - acpl * 0.45 - blunders * 5 - mistakes * 2), 20, 99);
-
   return {
-    movesAnalyzed,
-    acpl,
-    blunders,
-    mistakes,
-    inaccuracies,
-    accuracy,
+    cplList,
     moveBreakdown,
-    mateSeen,
-    endedQuickly: selectedMoves.length < 20,
   };
 }
 
@@ -821,12 +772,7 @@ export default function App() {
         ? {
             ...getInitialRatingState(),
             ...parsed,
-            playerEloInternal:
-              typeof parsed.playerEloInternal === "number" && Number.isFinite(parsed.playerEloInternal)
-                ? parsed.playerEloInternal
-                : parsed.playerElo,
-            isCalibrated: (parsed.gamesRated || 0) > 0,
-            confidence: getConfidenceLabel(parsed.gamesRated || 0),
+            confidence: parsed.confidence || "Low",
           }
         : getInitialRatingState();
     } catch {
@@ -932,7 +878,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const nextBotElo = chooseBotElo(ratingState, lastGameSummaryForBot);
+    const nextBotElo = chooseOpponentElo(ratingState, lastGameSummaryForBot?.performanceElo);
     const nextMoveTime = mapMovetimeFromElo(nextBotElo);
     setBotEloUsedThisGame(nextBotElo);
     setCurrentMoveTimeMs(nextMoveTime);
@@ -1003,31 +949,26 @@ export default function App() {
     }));
 
     try {
-      const moveLoss = await computeMoveLoss({
-        fenBefore,
-        userMoveUciOrSan: moveToUci(move),
-        userColor: youColor,
-        movetimeMsEval: 90,
-      });
+      const moveLoss = await computeMoveLossVsBest(fenBefore, moveToUci(move), youColor, 90);
 
       const cpl = moveLoss.moveLossCp;
-      const bucket = coachBucketFromGradeLabel(moveLoss.gradeLabel);
+      const bucket = coachBucketFromGradeLabel(moveLoss.grade);
 
       const message = getCoachLine(bucket, { san: move.san, cpl, recentLines: recentCoachLines, roastMode });
       setCoachState({
         lastUserMove: move,
         cpl,
         bucket,
-        evalDelta: Math.round(moveLoss.evalAfterUser.userScoreCp - moveLoss.bestEvalBeforeUser.userScoreCp),
+        evalDelta: Math.round(moveLoss.afterCp - moveLoss.bestBeforeCp),
         message,
       });
       setCoachDebug({
         fenBefore,
-        fenAfter: moveLoss.evalAfterUser.fenUsed || fenAfter,
-        bestEvalBeforeUser: moveLoss.bestEvalBeforeUser.userScoreCp,
-        evalAfterUser: moveLoss.evalAfterUser.userScoreCp,
+        fenAfter,
+        bestBeforeCp: moveLoss.bestBeforeCp,
+        afterCp: moveLoss.afterCp,
         moveLossCp: cpl,
-        grade: moveLoss.gradeLabel,
+        grade: moveLoss.grade,
       });
       setRecentCoachLines((prev) => [message.line, ...prev].slice(0, 3));
       return moveLoss;
@@ -1137,19 +1078,12 @@ export default function App() {
     }).catch((error) => {
       console.error("Post-game analysis failed", error);
       return {
-        movesAnalyzed: 0,
-        acpl: 0,
-        blunders: 0,
-        mistakes: 0,
-        inaccuracies: 0,
-        accuracy: 50,
+        cplList: [],
         moveBreakdown: [],
-        mateSeen: false,
-        endedQuickly: true,
       };
     });
 
-    const ratingUpdate = updatePlayerElo(ratingState, botEloUsedThisGame, res, analysisSummary);
+    const ratingUpdate = applyGameResult(ratingState, { opponentElo: botEloUsedThisGame, result: res, cplList: analysisSummary.cplList });
     const wasUncalibrated = ratingState.gamesRated === 0;
     setRatingState(ratingUpdate.nextState);
     setLastRatedSummary({
@@ -1168,12 +1102,19 @@ export default function App() {
     }
     setDebugInfo({
       botEloUsedThisGame,
-      expectedScore: ratingUpdate.summary.expectedScore,
-      kFactor: ratingUpdate.summary.kFactor,
       performanceElo: ratingUpdate.summary.performanceElo,
+      playerEloBefore: ratingUpdate.summary.playerEloBefore,
+      playerEloAfter: ratingUpdate.summary.playerEloAfter,
+      uncertainty: ratingUpdate.summary.uncertainty,
+      acpl: ratingUpdate.summary.acpl,
+      blunders: ratingUpdate.summary.blunders,
+      mistakes: ratingUpdate.summary.mistakes,
+      inaccuracies: ratingUpdate.summary.inaccuracies,
+      kFactor: ratingUpdate.summary.kFactor,
+      expectedScore: ratingUpdate.summary.expectedScore,
       alpha: ratingUpdate.summary.alpha,
-      clampLow: ratingUpdate.summary.clampedLow,
-      clampHigh: ratingUpdate.summary.clampedHigh,
+      maxDelta: ratingUpdate.summary.maxDelta,
+      lastMoveDebug: analysisSummary.moveBreakdown?.[analysisSummary.moveBreakdown.length - 1] || null,
     });
   }
 
@@ -1398,13 +1339,18 @@ Mode: <b>Rated</b>
                 <details className="mt-2 text-xs text-sky-100/95">
                   <summary className="cursor-pointer">Last game</summary>
                   <div className="mt-1">
-                    vs unknown • Result: {ratingState.lastGameSummary.result} • ACPL: {ratingState.lastGameSummary.acpl} • Blunders: {ratingState.lastGameSummary.blunders} • Performance: {ratingState.lastGameSummary.performanceElo} (±{ratingState.lastGameSummary.performanceRange?.halfWidth || 200})
+                    vs {ratingState.lastGameSummary.opponentElo} • Result: {ratingState.lastGameSummary.result} • ACPL: {ratingState.lastGameSummary.acpl} • Blunders: {ratingState.lastGameSummary.blunders} • Performance: {ratingState.lastGameSummary.performanceElo}
                   </div>
                 </details>
               ) : null}
               {isDebug && debugInfo ? (
-                <div className="text-xs text-sky-200 mt-2">
-                  debug — botEloUsedThisGame: {debugInfo.botEloUsedThisGame} · performanceElo: {debugInfo.performanceElo} · expectedScore: {debugInfo.expectedScore.toFixed(3)} · K: {debugInfo.kFactor} · alpha: {debugInfo.alpha.toFixed(2)} · clamp: {debugInfo.clampLow}..{debugInfo.clampHigh}
+                <div className="text-xs text-sky-200 mt-2 space-y-1">
+                  <div>
+                    debug — oppElo: {debugInfo.botEloUsedThisGame} · ACPL: {debugInfo.acpl} · blunders: {debugInfo.blunders} · mistakes: {debugInfo.mistakes} · inaccuracies: {debugInfo.inaccuracies} · perf: {debugInfo.performanceElo} · Elo: {debugInfo.playerEloBefore}→{debugInfo.playerEloAfter} · uncertainty: ±{debugInfo.uncertainty}
+                  </div>
+                  <div>
+                    last move — bestBeforeCp: {debugInfo.lastMoveDebug?.bestBeforeCp ?? "--"} · afterCp: {debugInfo.lastMoveDebug?.afterCp ?? "--"} · moveLossCp: {debugInfo.lastMoveDebug?.cpLoss ?? "--"}
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -1681,8 +1627,8 @@ Mode: <b>Rated</b>
                 <div className="font-semibold text-amber-100">Coach debug (?debug=1)</div>
                 <div className="text-amber-50/90 break-all">fenBefore: {coachDebug.fenBefore}</div>
                 <div className="text-amber-50/90 break-all">fenAfter: {coachDebug.fenAfter}</div>
-                <div className="text-amber-50/90">bestEvalBeforeUser: {coachDebug.bestEvalBeforeUser ?? "--"}</div>
-                <div className="text-amber-50/90">evalAfterUser: {coachDebug.evalAfterUser ?? "--"}</div>
+                <div className="text-amber-50/90">bestBeforeCp: {coachDebug.bestBeforeCp ?? "--"}</div>
+                <div className="text-amber-50/90">afterCp: {coachDebug.afterCp ?? "--"}</div>
                 <div className="text-amber-50/90">moveLossCp: {coachDebug.moveLossCp ?? "--"}</div>
                 <div className="text-amber-50/90">grade: {coachDebug.grade ?? "--"}</div>
                 {coachDebug.error ? <div className="text-rose-200">error: {coachDebug.error}</div> : null}
