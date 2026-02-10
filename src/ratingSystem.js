@@ -38,6 +38,49 @@ function getQualityAdjustment(acpl) {
   return -400;
 }
 
+function getAccuracyAdjustment(accuracy) {
+  if (!Number.isFinite(accuracy)) return 0;
+
+  if (accuracy >= 95) return 260;
+  if (accuracy >= 90) return 170;
+  if (accuracy >= 85) return 90;
+  if (accuracy >= 80) return 20;
+  if (accuracy >= 75) return -70;
+  if (accuracy >= 70) return -160;
+  if (accuracy >= 65) return -250;
+  if (accuracy >= 60) return -330;
+  if (accuracy >= 55) return -420;
+  if (accuracy >= 50) return -520;
+  return -650;
+}
+
+function getConsistencyPenalty({ movesAnalyzed = 0, blunders = 0, mistakes = 0, inaccuracies = 0 }) {
+  const moveCount = Math.max(1, movesAnalyzed);
+  const severeRate = (Math.max(0, blunders) + Math.max(0, mistakes) * 0.65) / moveCount;
+  const noisyRate = (Math.max(0, inaccuracies) + Math.max(0, mistakes)) / moveCount;
+
+  const severePenalty = Math.round(Math.min(280, severeRate * 520));
+  const noisyPenalty = Math.round(Math.min(120, noisyRate * 130));
+  return -(severePenalty + noisyPenalty);
+}
+
+function getMoveQualityBalance({
+  movesAnalyzed = 0,
+  bestMoves = 0,
+  excellentMoves = 0,
+  goodMoves = 0,
+  inaccuracies = 0,
+  mistakes = 0,
+  blunders = 0,
+}) {
+  const total = Math.max(1, movesAnalyzed);
+  const positive = (Math.max(0, bestMoves) * 1.3 + Math.max(0, excellentMoves) + Math.max(0, goodMoves) * 0.6) / total;
+  const negative =
+    (Math.max(0, inaccuracies) * 0.7 + Math.max(0, mistakes) * 1.6 + Math.max(0, blunders) * 3.1) / total;
+
+  return Math.round((positive - negative) * 220);
+}
+
 function getResultScore(gameResult) {
   if (gameResult === "win") return 1;
   if (gameResult === "draw") return 0.5;
@@ -95,7 +138,7 @@ function getKFactor(gamesRated) {
 }
 
 function getAlpha(gamesRated) {
-  return clamp(0.65 - 0.08 * gamesRated, 0.15, 0.65);
+  return clamp(0.78 - 0.08 * gamesRated, 0.22, 0.78);
 }
 
 function getMaxSwing(gamesRated) {
@@ -106,9 +149,13 @@ function getMaxSwing(gamesRated) {
 
 export function estimatePerformanceElo({
   acpl,
+  accuracy,
   blunders = 0,
   mistakes = 0,
   inaccuracies = 0,
+  goodMoves = 0,
+  excellentMoves = 0,
+  bestMoves = 0,
   result,
   opponentElo,
   movesAnalyzed = 0,
@@ -118,11 +165,33 @@ export function estimatePerformanceElo({
   const base = Number.isFinite(opponentElo) ? opponentElo : DEFAULT_ELO;
   const resultAdjustment = getResultAdjustment(result);
   const qualityAdjustment = getQualityAdjustment(acpl);
+  const accuracyAdjustment = getAccuracyAdjustment(accuracy);
+  const consistencyPenalty = getConsistencyPenalty({ movesAnalyzed, blunders, mistakes, inaccuracies });
+  const moveQualityBalance = getMoveQualityBalance({
+    movesAnalyzed,
+    bestMoves,
+    excellentMoves,
+    goodMoves,
+    inaccuracies,
+    mistakes,
+    blunders,
+  });
   const blunderPenalty = -Math.min(360, Math.max(0, blunders) * 120);
   const mistakePenalty = -Math.min(240, Math.max(0, mistakes) * 60);
   const inaccuracyPenalty = -Math.min(120, Math.max(0, inaccuracies) * 20);
+  const lowAccuracyExtraPenalty = Number.isFinite(accuracy) && accuracy < 60 ? -Math.round((60 - accuracy) * 8) : 0;
 
-  const rawPerformance = base + resultAdjustment + qualityAdjustment + blunderPenalty + mistakePenalty + inaccuracyPenalty;
+  const rawPerformance =
+    base +
+    resultAdjustment +
+    qualityAdjustment +
+    accuracyAdjustment +
+    consistencyPenalty +
+    moveQualityBalance +
+    blunderPenalty +
+    mistakePenalty +
+    inaccuracyPenalty +
+    lowAccuracyExtraPenalty;
   const performanceElo = clamp(Math.round(rawPerformance), MIN_ELO, MAX_ELO);
 
   const baseRange = getRangeFromGames(0);
@@ -139,9 +208,13 @@ export function estimatePerformanceElo({
     components: {
       resultAdjustment,
       qualityAdjustment,
+      accuracyAdjustment,
+      consistencyPenalty,
+      moveQualityBalance,
       blunderPenalty,
       mistakePenalty,
       inaccuracyPenalty,
+      lowAccuracyExtraPenalty,
     },
   };
 }
