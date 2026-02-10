@@ -159,7 +159,7 @@ export async function setStrength(options = {}) {
     await initEngine();
 
     if (Number.isFinite(options.elo)) {
-      const elo = Math.max(1350, Math.min(2850, Math.round(options.elo)));
+      const elo = Math.max(600, Math.min(2600, Math.round(options.elo)));
       post("setoption name UCI_LimitStrength value true");
       post(`setoption name UCI_Elo value ${elo}`);
     } else {

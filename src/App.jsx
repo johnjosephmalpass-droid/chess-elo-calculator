@@ -1,6 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachFeedback from "./CoachFeedback";
 import { getBestMove, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
+import {
+  chooseBotElo,
+  getConfidenceLabel,
+  getInitialRatingState,
+  getUncertainty,
+  mapMovetimeFromElo,
+  updatePlayerElo,
+} from "./ratingSystem.js";
 
 
 /**
@@ -479,46 +487,6 @@ function evalBoard(board) {
   return score;
 }
 
-// --- Elo estimator ---
-function estimateEloFromGame(movesPlayed, avgLoss, blunders, result, botStrength) {
-  const base =
-    botStrength <= 20
-      ? 600
-      : botStrength <= 40
-      ? 900
-      : botStrength <= 60
-      ? 1200
-      : botStrength <= 80
-      ? 1500
-      : botStrength <= 95
-      ? 1750
-      : 1900;
-
-  let elo = base;
-
-  if (avgLoss < 40) elo += 180;
-  else if (avgLoss < 70) elo += 120;
-  else if (avgLoss < 110) elo += 60;
-  else if (avgLoss < 160) elo += 0;
-  else if (avgLoss < 220) elo -= 80;
-  else elo -= 160;
-
-  elo -= blunders * 70;
-
-  if (result === "win") elo += 120;
-  else if (result === "draw") elo += 20;
-  else elo -= 80;
-
-  if (movesPlayed < 20) elo -= 40;
-
-  elo = Math.max(200, Math.min(2400, Math.round(elo)));
-
-  const conf =
-    Math.max(0.25, Math.min(0.9, movesPlayed / 40)) * (1 - Math.min(0.5, blunders / 6));
-
-  return { elo, conf: Math.round(conf * 100) };
-}
-
 function lossForMove(boardBefore, mv, side, castle) {
   const moves = legalMoves(boardBefore, side, castle);
   if (moves.length === 0) return 0;
@@ -581,11 +549,7 @@ function parseUciMove(uci) {
   };
 }
 
-function strengthToSkillLevel(strength) {
-  return clamp(Math.round((strength / 100) * 20), 0, 20);
-}
-
-const STORAGE_KEY = "chess-elo-calculator:last5";
+const RATING_STORAGE_KEY = "chess-elo-calculator:rating-state";
 
 const THEMES = [
   {
@@ -794,35 +758,42 @@ export default function App() {
   const [board, setBoard] = useState(makeStartBoard);
   const [turn, setTurn] = useState("w");
   const [selected, setSelected] = useState(null);
-  const [status, setStatus] = useState("Your move (White)");
-  const [botPlays, setBotPlays] = useState("b");
-  const [botStrength, setBotStrength] = useState(60);
-  const [botPersonality, setBotPersonality] = useState("strategist");
+  const [status, setStatus] = useState("Play");
+  const [botEloUsedThisGame, setBotEloUsedThisGame] = useState(1200);
+  const [currentMoveTimeMs, setCurrentMoveTimeMs] = useState(200);
   const [selfTestResult, setSelfTestResult] = useState("");
   const [selfTestError, setSelfTestError] = useState("");
   const [selfTestBusy, setSelfTestBusy] = useState(false);
   const [themeId, setThemeId] = useState("nebula");
   const [moves, setMoves] = useState([]); // {from,to,promo,side,loss}
   const [result, setResult] = useState(null);
-  const [lastElo, setLastElo] = useState(null);
+  const [lastRatedSummary, setLastRatedSummary] = useState(null);
+  const [lastGameSummaryForBot, setLastGameSummaryForBot] = useState(null);
+  const [debugInfo, setDebugInfo] = useState(null);
+  const [ratingState, setRatingState] = useState(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(RATING_STORAGE_KEY) || "null");
+      return parsed && typeof parsed.playerElo === "number" && Number.isFinite(parsed.gamesRated)
+        ? {
+            ...getInitialRatingState(),
+            ...parsed,
+            confidence: getConfidenceLabel(parsed.gamesRated || 0),
+          }
+        : getInitialRatingState();
+    } catch {
+      return getInitialRatingState();
+    }
+  });
 
   // castling rights
   const [castle, setCastle] = useState({ wK: true, wQ: true, bK: true, bQ: true });
 
-  const [history, setHistory] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    } catch {
-      return [];
-    }
-  });
 
-  const youColor = botPlays === "w" ? "b" : "w";
+  const botPlays = "b";
+  const youColor = "w";
   const theme = useMemo(() => THEMES.find((t) => t.id === themeId) || THEMES[0], [themeId]);
-  const personality = useMemo(
-    () => BOT_PERSONALITIES.find((p) => p.id === botPersonality) || BOT_PERSONALITIES[0],
-    [botPersonality],
-  );
+  const personality = BOT_PERSONALITIES[0];
+  const isDebug = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
 
   // rotate board so YOU are always at the bottom (like chess.com)
   const squares = useMemo(() => {
@@ -868,7 +839,7 @@ export default function App() {
   const botQuip = useMemo(() => {
     const idx = moves.length % personality.quips.length;
     return personality.quips[idx];
-  }, [moves.length, personality]);
+  }, [moves.length, personality.quips]);
 
   useEffect(() => {
     initEngine().catch((error) => {
@@ -877,15 +848,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    setStrength({ skillLevel: strengthToSkillLevel(botStrength) });
-  }, [botStrength]);
+    const nextBotElo = chooseBotElo(ratingState, lastGameSummaryForBot);
+    const nextMoveTime = mapMovetimeFromElo(nextBotElo);
+    setBotEloUsedThisGame(nextBotElo);
+    setCurrentMoveTimeMs(nextMoveTime);
+    setStrength({ elo: nextBotElo, movetimeMs: nextMoveTime }).catch((error) => {
+      console.error("Failed to set bot strength", error);
+    });
+  }, [ratingState, lastGameSummaryForBot]);
 
-  const avg5 = useMemo(() => {
-    if (!history.length) return null;
-    const mean = Math.round(history.reduce((a, h) => a + h.elo, 0) / history.length);
-    const conf = Math.round(history.reduce((a, h) => a + h.conf, 0) / history.length);
-    return { mean, conf, n: history.length };
-  }, [history]);
+  useEffect(() => {
+    localStorage.setItem(RATING_STORAGE_KEY, JSON.stringify(ratingState));
+  }, [ratingState]);
 
   async function handleSelfTest() {
     setSelfTestBusy(true);
@@ -911,14 +885,14 @@ export default function App() {
     let cancelled = false;
 
     const playBotMove = async () => {
-      setStatus(`Bot thinking… (${personality.name}, strength ${botStrength})`);
+      setStatus(ratingState.gamesRated < 5 ? "Calibrating…" : "Refining…");
 
       const legal = legalMoves(board, turn, castle);
       if (!legal.length) return;
 
       try {
         const fen = boardToFen(board, turn, castle, moves.length);
-        const uci = await getBestMove(fen, 250);
+        const uci = await getBestMove(fen, currentMoveTimeMs);
         if (cancelled) return;
 
         const parsed = parseUciMove(uci);
@@ -962,7 +936,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [turn, botPlays, botStrength, board, result, castle, youColor, personality, moves.length]);
+  }, [turn, botPlays, board, result, castle, youColor, personality, moves.length, currentMoveTimeMs, ratingState.gamesRated]);
 
   function finishGame(gr, finalBoard, nextTurn, nextCastle) {
     let resText = "Draw";
@@ -985,23 +959,19 @@ export default function App() {
       : 0;
     const blunders = yourMoves.filter((m) => m.loss > 300).length;
 
-    const est = estimateEloFromGame(movesPlayed, avgLoss, blunders, res, botStrength);
-    setLastElo({ ...est, avgLoss, blunders, movesPlayed, vs: botStrength });
-
-    const entry = {
-      ts: Date.now(),
-      elo: est.elo,
-      conf: est.conf,
-      avgLoss,
-      blunders,
-      movesPlayed,
-      result: res,
-      botStrength,
-    };
-
-    const newHist = [entry, ...history].slice(0, 5);
-    setHistory(newHist);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newHist));
+    const ratingUpdate = updatePlayerElo(ratingState, botEloUsedThisGame, res, { avgLoss, blunders });
+    setRatingState(ratingUpdate.nextState);
+    setLastRatedSummary({
+      playerElo: ratingUpdate.nextState.playerElo,
+      uncertainty: ratingUpdate.summary.uncertainty,
+      confidence: ratingUpdate.summary.confidence,
+    });
+    setLastGameSummaryForBot({ result: res, avgLoss, blunders });
+    setDebugInfo({
+      botEloUsedThisGame,
+      expectedScore: ratingUpdate.summary.expectedScore,
+      kFactor: ratingUpdate.summary.kFactor,
+    });
   }
 
   function reset() {
@@ -1010,15 +980,11 @@ export default function App() {
     setSelected(null);
     setMoves([]);
     setResult(null);
-    setLastElo(null);
+    setLastRatedSummary(null);
     setCastle({ wK: true, wQ: true, bK: true, bQ: true });
     setStatus(`Your move (${colorToMoveName(youColor)})`);
   }
 
-  function clearHistory() {
-    setHistory([]);
-    localStorage.removeItem(STORAGE_KEY);
-  }
 
   function handleSquareClick(sq) {
     if (result) return;
@@ -1096,10 +1062,9 @@ export default function App() {
             {/* Header */}
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">Chess Elo Calculator</h1>
+                <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">Play</h1>
                 <p className="text-neutral-300 mt-2 max-w-2xl">
-                  Play vs the bot. We estimate your Elo (fun, not official) based on move quality. Now with themes,
-                  analysis, and bot personalities.
+                  Rated mode is always on. Your Elo estimate updates after every game.
                 </p>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1107,7 +1072,7 @@ export default function App() {
                     You: <b>{colorToMoveName(youColor)}</b>
                   </Pill>
                   <Pill tone="neutral">
-                    Bot: <b>{personality.name}</b>
+Mode: <b>Rated</b>
                   </Pill>
                   <Pill tone={turnTone}>{result ? "Game finished" : turn === youColor ? "Your move" : "Bot move"}</Pill>
                   {result && <Pill tone={resultTone}>{result.text}</Pill>}
@@ -1129,13 +1094,26 @@ export default function App() {
                 >
                   New game
                 </button>
-                <button
-                  onClick={clearHistory}
-                  className="px-4 py-2 rounded-xl bg-neutral-900/40 hover:bg-neutral-900/60 border border-white/10 transition"
-                >
-                  Clear last 5
-                </button>
               </div>
+            </div>
+
+            <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4">
+              <div className="text-sm sm:text-base font-medium text-sky-100">
+                {ratingState.gamesRated < 5
+                  ? `Calibrating… Play ${5 - ratingState.gamesRated} more rated games to get your Elo.`
+                  : `Elo estimate: ${ratingState.playerElo} (±${getUncertainty(ratingState.gamesRated)}). Keep playing to refine.`}
+              </div>
+              <div className="text-xs text-sky-200/90 mt-1">Confidence: {getConfidenceLabel(ratingState.gamesRated)}</div>
+              {lastRatedSummary ? (
+                <div className="text-xs text-sky-100 mt-2">
+                  Updated estimate: {lastRatedSummary.playerElo} (±{lastRatedSummary.uncertainty})
+                </div>
+              ) : null}
+              {isDebug && debugInfo ? (
+                <div className="text-xs text-sky-200 mt-2">
+                  debug — botEloUsedThisGame: {debugInfo.botEloUsedThisGame} · expectedScore: {debugInfo.expectedScore.toFixed(3)} · K: {debugInfo.kFactor}
+                </div>
+              ) : null}
             </div>
 
             {/* Board card */}
@@ -1270,36 +1248,15 @@ export default function App() {
             <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="text-sm text-neutral-200">
-                  <div className="font-medium">Bot settings</div>
-                  <div className="text-neutral-400 mt-1">Tip: keep strength fixed for steadier estimates.</div>
+                  <div className="font-medium">Engine status</div>
+                  <div className="text-neutral-400 mt-1">Bot strength auto-adjusts in rated mode.</div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className="text-sm text-neutral-300">Bot plays</label>
-                  <select
-                    value={botPlays}
-                    onChange={(e) => {
-                      setBotPlays(e.target.value);
-                      reset();
-                    }}
-                    className="bg-neutral-950/60 border border-white/10 rounded-xl px-3 py-2 text-sm"
-                  >
-                    <option value="b">Black</option>
-                    <option value="w">White</option>
-                  </select>
-
-                  <label className="text-sm text-neutral-300">Strength</label>
-                  <input
-                    type="range"
-                    min={10}
-                    max={95}
-                    step={5}
-                    value={botStrength}
-                    onChange={(e) => setBotStrength(parseInt(e.target.value, 10))}
-                    className="accent-sky-400"
-                    style={{ accentColor: theme.accent }}
-                  />
-                  <span className="text-sm text-neutral-200 w-10 text-right font-semibold">{botStrength}</span>
+                <div className="flex flex-wrap items-center gap-3 text-sm text-neutral-300">
+                  <span>Bot opponent</span>
+                  <span className="font-semibold text-neutral-100">Adjusting…</span>
+                  <span>Move speed</span>
+                  <span className="font-semibold text-neutral-100">{currentMoveTimeMs}ms</span>
                 </div>
               </div>
 
@@ -1313,22 +1270,8 @@ export default function App() {
                       <div className="text-xs text-neutral-400">{personality.tagline}</div>
                     </div>
                   </div>
-                  <select
-                    value={botPersonality}
-                    onChange={(e) => {
-                      setBotPersonality(e.target.value);
-                      reset();
-                    }}
-                    className="mt-3 w-full bg-neutral-950/60 border border-white/10 rounded-xl px-3 py-2 text-sm"
-                  >
-                    {BOT_PERSONALITIES.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
                   <div className="mt-3 text-sm text-neutral-300">
-                    Bot says: <span className="font-medium text-neutral-100">“{botQuip}”</span>
+                    Bot status: <span className="font-medium text-neutral-100">“{botQuip}”</span>
                   </div>
                 </div>
 
@@ -1395,137 +1338,6 @@ export default function App() {
                   )}
                 </div>
               </div>
-
-              {/* Elo */}
-              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-                <h2 className="font-semibold text-lg">Elo estimate</h2>
-
-                <div className="mt-3">
-                  {!lastElo ? (
-                    <div className="text-neutral-400 text-sm">Finish a game to get an estimate.</div>
-                  ) : (
-                    (() => {
-                      const betterThan = approxPercentileBetterThan(lastElo.elo);
-                      const topPct = Math.max(0.1, 100 - betterThan);
-                      const lvl = chessLevel(lastElo.elo);
-                      const badges = buildBadges({
-                        avgLoss: lastElo.avgLoss,
-                        blunders: lastElo.blunders,
-                        movesPlayed: lastElo.movesPlayed,
-                        result: result?.yours,
-                        vs: lastElo.vs,
-                      });
-
-                      return (
-                        <div className="space-y-4">
-                          {/* Big number + level */}
-                          <div className="flex items-end justify-between gap-3">
-                            <div>
-                              <div className="text-xs uppercase tracking-wide text-neutral-400">Estimated Elo</div>
-                              <div className="text-5xl font-semibold tracking-tight leading-none">{lastElo.elo}</div>
-                            </div>
-
-                            <Pill tone={lvl.tone}>
-                              <span className="text-base">{lvl.emoji}</span>
-                              <span>
-                                Level: <b>{lvl.name}</b>
-                              </span>
-                            </Pill>
-                          </div>
-
-                          {/* Percentile card */}
-                          <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-sm text-neutral-200 font-medium">
-                                You’re better than{" "}
-                                <span className="font-semibold text-white">{betterThan.toFixed(1)}%</span> of players
-                              </div>
-                              <div className="text-sm text-neutral-300">
-                                Top <span className="font-semibold text-white">{topPct.toFixed(1)}%</span>
-                              </div>
-                            </div>
-
-                            <div className="mt-3 h-2 rounded-full bg-white/10 overflow-hidden">
-                              <div className="h-full bg-white/60" style={{ width: `${clamp(betterThan, 1, 99.7)}%` }} />
-                            </div>
-
-                            <div className="mt-2 text-xs text-neutral-400">
-                              Percentile is a rough approximation for fun (not official).
-                            </div>
-                          </div>
-
-                          {/* Ego line */}
-                          <div className="text-sm text-neutral-200">
-                            <span className="text-neutral-400">Coach:</span>{" "}
-                            <span className="font-medium">
-                              {egoLine({ avgLoss: lastElo.avgLoss, blunders: lastElo.blunders, result: result?.yours })}
-                            </span>
-                          </div>
-
-                          {/* Stats grid */}
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="rounded-2xl border border-white/10 bg-neutral-950/30 p-3">
-                              <div className="text-xs text-neutral-400">Confidence</div>
-                              <div className="text-lg font-semibold text-white">{lastElo.conf}%</div>
-                            </div>
-                            <div className="rounded-2xl border border-white/10 bg-neutral-950/30 p-3">
-                              <div className="text-xs text-neutral-400">Avg centipawn loss</div>
-                              <div className="text-lg font-semibold text-white">{lastElo.avgLoss}cp</div>
-                            </div>
-                            <div className="rounded-2xl border border-white/10 bg-neutral-950/30 p-3">
-                              <div className="text-xs text-neutral-400">Blunders</div>
-                              <div className="text-lg font-semibold text-white">{lastElo.blunders}</div>
-                            </div>
-                            <div className="rounded-2xl border border-white/10 bg-neutral-950/30 p-3">
-                              <div className="text-xs text-neutral-400">Vs bot strength</div>
-                              <div className="text-lg font-semibold text-white">{lastElo.vs}</div>
-                            </div>
-                          </div>
-
-                          {/* Badges */}
-                          {badges.length > 0 && (
-                            <div className="flex flex-wrap gap-2 pt-1">
-                              {badges.map((b, i) => (
-                                <Pill key={i} tone={b.tone}>
-                                  <span>{b.emoji}</span> {b.label}
-                                </Pill>
-                              ))}
-                            </div>
-                          )}
-
-                          <div className="text-xs text-neutral-500">
-                            Uses a quick 1-ply benchmark (not Stockfish). Fun estimate, not official.
-                          </div>
-                        </div>
-                      );
-                    })()
-                  )}
-                </div>
-
-                <h3 className="font-semibold mt-6">Last 5 games</h3>
-                {history.length === 0 ? (
-                  <div className="text-neutral-400 text-sm mt-2">No games saved yet.</div>
-                ) : (
-                  <div className="mt-2 space-y-2">
-                    {avg5 && (
-                      <div className="text-sm text-neutral-200">
-                        Average: <span className="font-semibold">{avg5.mean}</span>{" "}
-                        <span className="text-neutral-400">(avg conf {avg5.conf}%, n={avg5.n})</span>
-                      </div>
-                    )}
-                    <ul className="text-sm text-neutral-300 space-y-1">
-                      {history.map((h) => (
-                        <li key={h.ts} className="flex items-center justify-between">
-                          <span className="text-neutral-400">
-                            {new Date(h.ts).toLocaleString()} · {h.result.toUpperCase()} vs {h.botStrength}
-                          </span>
-                          <span className="font-semibold text-neutral-100">{h.elo}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
             </div>
 
             <CoachFeedback moves={moves} youColor={youColor} result={result} />
@@ -1587,14 +1399,14 @@ export default function App() {
               <div className="p-4 rounded-2xl bg-neutral-950/40 border border-white/10">
                 <div className="text-sm text-neutral-200 font-medium">How it works</div>
                 <ol className="text-xs text-neutral-400 mt-2 space-y-1 list-decimal list-inside">
-                  <li>Play vs the bot (quick evaluator).</li>
-                  <li>We track centipawn loss vs the best 1-ply move.</li>
-                  <li>That + result maps to a rough Elo estimate.</li>
+                  <li>Play rated games against an adaptive hidden-strength bot.</li>
+                  <li>Each result updates your Elo estimate and uncertainty.</li>
+                  <li>Keep playing to refine confidence over time.</li>
                 </ol>
               </div>
 
               <div className="text-xs text-neutral-500">
-                Disclaimer: entertainment estimate. Real Elo requires rated opponents + many games.
+                Estimate is local to this browser and improves with more rated games.
               </div>
             </div>
           </div>
