@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachFeedback from "./CoachFeedback";
+import { getBestMove, initEngine, setStrength } from "./stockfishEngine";
 
 /**
  * Chess Elo Calculator (polished + castling + flipped board)
- * - Tiny in-browser bot (1-ply eval)
+ * - In-browser Stockfish bot via Web Worker
  * - Tracks per-move centipawn loss
  * - Estimates fun Elo + stores last 5 games
  * - Adds castling + rotates board so YOU are always at the bottom
@@ -396,7 +397,7 @@ function gameResult(board, sideToMove, castle) {
   return { type: "stalemate", winner: null };
 }
 
-// --- Tiny eval + bot ---
+// --- Tiny eval (used for move-loss stats) ---
 const PIECE_VALUES = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 0 };
 
 const PST = {
@@ -477,42 +478,6 @@ function evalBoard(board) {
   return score;
 }
 
-function pickBotMove(board, side, strength, castle, personality) {
-  const moves = legalMoves(board, side, castle);
-  if (moves.length === 0) return null;
-
-  const bias = personality?.strengthBias ?? 0;
-  const chaos = personality?.chaos ?? 0.3;
-  const blunderChance = personality?.blunderChance ?? 0;
-  const effectiveStrength = clamp(strength + bias, 10, 98);
-
-  const scored = moves.map((mv) => {
-    const nb = applyMove(board, mv);
-    const s = evalBoard(nb);
-    return { mv, s: side === "w" ? s : -s };
-  });
-
-  scored.sort((a, b) => b.s - a.s);
-
-  const chaosBoost = 1 + chaos * 1.4;
-  const K = Math.max(1, Math.min(scored.length, Math.round((1 + (100 - effectiveStrength) / 8) * chaosBoost)));
-  const pickFrom = scored.slice(0, K);
-
-  if (Math.random() < blunderChance && scored.length > 4) {
-    const tail = scored.slice(-Math.min(6, scored.length));
-    return tail[Math.floor(Math.random() * tail.length)].mv;
-  }
-
-  const weights = pickFrom.map((_, i) => Math.exp((K - i) / 2));
-  const sum = weights.reduce((a, b) => a + b, 0);
-  let roll = Math.random() * sum;
-  for (let i = 0; i < pickFrom.length; i++) {
-    roll -= weights[i];
-    if (roll <= 0) return pickFrom[i].mv;
-  }
-  return pickFrom[0].mv;
-}
-
 // --- Elo estimator ---
 function estimateEloFromGame(movesPlayed, avgLoss, blunders, result, botStrength) {
   const base =
@@ -577,6 +542,46 @@ function formatMove(mv) {
     (mv.from === "e8" && (mv.to === "g8" || mv.to === "c8"));
   if (isCastle) return mv.to[0] === "g" ? "O-O" : "O-O-O";
   return `${mv.from}-${mv.to}${mv.promo ? `=${mv.promo.toUpperCase()}` : ""}`;
+}
+
+function boardToFen(board, sideToMove, castle, plyCount = 0) {
+  const rows = [];
+  for (let r = 7; r >= 0; r--) {
+    let row = "";
+    let empty = 0;
+    for (let f = 0; f < 8; f++) {
+      const pc = board[r][f];
+      if (!pc) {
+        empty += 1;
+      } else {
+        if (empty) {
+          row += empty;
+          empty = 0;
+        }
+        const letter = pc.c === "w" ? pc.p.toUpperCase() : pc.p;
+        row += letter;
+      }
+    }
+    if (empty) row += empty;
+    rows.push(row);
+  }
+
+  const castling = `${castle.wK ? "K" : ""}${castle.wQ ? "Q" : ""}${castle.bK ? "k" : ""}${castle.bQ ? "q" : ""}`;
+  const fullMove = Math.max(1, Math.floor(plyCount / 2) + 1);
+  return `${rows.join("/")} ${sideToMove} ${castling || "-"} - 0 ${fullMove}`;
+}
+
+function parseUciMove(uci) {
+  if (!uci || uci.length < 4) return null;
+  return {
+    from: uci.slice(0, 2),
+    to: uci.slice(2, 4),
+    promo: uci.length > 4 ? uci[4].toLowerCase() : null,
+  };
+}
+
+function strengthToSkillLevel(strength) {
+  return clamp(Math.round((strength / 100) * 20), 0, 20);
 }
 
 const STORAGE_KEY = "chess-elo-calculator:last5";
@@ -861,6 +866,16 @@ export default function App() {
     return personality.quips[idx];
   }, [moves.length, personality]);
 
+  useEffect(() => {
+    initEngine().catch((error) => {
+      console.error("Failed to initialize Stockfish", error);
+    });
+  }, []);
+
+  useEffect(() => {
+    setStrength({ skillLevel: strengthToSkillLevel(botStrength) });
+  }, [botStrength]);
+
   const avg5 = useMemo(() => {
     if (!history.length) return null;
     const mean = Math.round(history.reduce((a, h) => a + h.elo, 0) / history.length);
@@ -870,11 +885,35 @@ export default function App() {
 
   useEffect(() => {
     if (result) return;
-    if (turn === botPlays) {
+    if (turn !== botPlays) return;
+
+    let cancelled = false;
+
+    const playBotMove = async () => {
       setStatus(`Bot thinking… (${personality.name}, strength ${botStrength})`);
-      const t = setTimeout(() => {
-        const mv = pickBotMove(board, turn, botStrength, castle, personality);
-        if (!mv) return;
+
+      const legal = legalMoves(board, turn, castle);
+      if (!legal.length) return;
+
+      try {
+        const fen = boardToFen(board, turn, castle, moves.length);
+        const uci = await getBestMove(fen, 350);
+        if (cancelled) return;
+
+        const parsed = parseUciMove(uci);
+        if (!parsed) return;
+
+        const mv = legal.find(
+          (m) =>
+            m.from === parsed.from &&
+            m.to === parsed.to &&
+            (m.promo || null) === (parsed.promo || null),
+        );
+
+        if (!mv) {
+          console.warn("Stockfish suggested illegal move", uci, fen);
+          return;
+        }
 
         const loss = lossForMove(board, mv, turn, castle);
         const nextCastle = updateCastleRights(castle, board, mv);
@@ -891,11 +930,17 @@ export default function App() {
 
         if (gr) finishGame(gr, nb, nextTurn, nextCastle);
         else setStatus(`Your move (${colorToMoveName(youColor)})`);
-      }, 180);
+      } catch (error) {
+        console.error("Bot move failed", error);
+      }
+    };
 
-      return () => clearTimeout(t);
-    }
-  }, [turn, botPlays, botStrength, board, result, castle, youColor, personality]);
+    playBotMove();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [turn, botPlays, botStrength, board, result, castle, youColor, personality, moves.length]);
 
   function finishGame(gr, finalBoard, nextTurn, nextCastle) {
     let resText = "Draw";
