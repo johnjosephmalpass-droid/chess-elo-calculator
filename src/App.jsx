@@ -628,14 +628,9 @@ function gameAccuracyFromMoveLosses(moveLosses) {
   return Math.round(total / moveLosses.length);
 }
 
-function sideToMoveFromFen(fen) {
-  return fen.split(" ")[1] || "w";
-}
-
-function scoreFromUserPerspective(scoreObj, fen, youColor) {
+function scoreFromUserPerspective(scoreObj, youColor) {
   const cp = scoreObj?.cp ?? 0;
-  const sideToMove = sideToMoveFromFen(fen);
-  return sideToMove === youColor ? cp : -cp;
+  return youColor === "w" ? cp : -cp;
 }
 
 async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
@@ -704,9 +699,9 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
 
     if (before.type === "mate" || after.type === "mate" || bestAfter.type === "mate") mateSeen = true;
 
-    const scoreBefore = scoreFromUserPerspective(before, snapshot.fenBefore, youColor);
-    const scoreBestAfter = scoreFromUserPerspective(bestAfter, bestFenAfter, youColor);
-    const scoreAfter = scoreFromUserPerspective(after, snapshot.fenAfter, youColor);
+    const scoreBefore = scoreFromUserPerspective(before, youColor);
+    const scoreBestAfter = scoreFromUserPerspective(bestAfter, youColor);
+    const scoreAfter = scoreFromUserPerspective(after, youColor);
     const cpLossFromBest = Math.max(0, Math.round(scoreBestAfter - scoreAfter));
     const cpLossFromBefore = Math.max(0, Math.round(scoreBefore - scoreAfter));
     const cpLoss = Math.max(cpLossFromBest, cpLossFromBefore);
