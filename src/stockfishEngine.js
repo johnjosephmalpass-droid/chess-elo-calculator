@@ -147,6 +147,89 @@ function parseInfoScore(line) {
   return { type: "cp", value: cp, cp };
 }
 
+function parseInfoMultiPv(line) {
+  if (!line.startsWith("info ") || !line.includes(" pv ")) return null;
+
+  const multipvMatch = line.match(/\bmultipv\s+(\d+)/);
+  const cpMatch = line.match(/\bscore cp\s+(-?\d+)/);
+  const mateMatch = line.match(/\bscore mate\s+(-?\d+)/);
+  const pvMatch = line.match(/\bpv\s+([a-h][1-8][a-h][1-8][qrbn]?)/i);
+
+  if (!pvMatch) return null;
+
+  let cp = null;
+  if (mateMatch) {
+    const mateDistance = Number.parseInt(mateMatch[1], 10);
+    const sign = Math.sign(mateDistance || 1);
+    cp = sign * (MATE_CP_BASE - Math.min(99, Math.abs(mateDistance)) * 100);
+  } else if (cpMatch) {
+    cp = Number.parseInt(cpMatch[1], 10);
+  }
+
+  if (!Number.isFinite(cp)) return null;
+
+  return {
+    multipv: Number.parseInt(multipvMatch?.[1] || "1", 10),
+    move: pvMatch[1].toLowerCase(),
+    cp,
+  };
+}
+
+function personalitySearchOptions(personalityId, thinkMs) {
+  const moveTime = Math.max(50, Math.round(thinkMs ?? DEFAULT_MOVE_TIME_MS));
+  if (personalityId === "strategist") return { multipv: 3, moveTime: Math.round(moveTime * 1.2) };
+  if (personalityId === "tactician") return { multipv: 5, moveTime };
+  if (personalityId === "trickster") return { multipv: 6, moveTime };
+  if (personalityId === "endgame-grinder") return { multipv: 4, moveTime };
+  return { multipv: 3, moveTime };
+}
+
+function weightedChoice(items) {
+  const total = items.reduce((sum, item) => sum + Math.max(0.001, item.weight || 0), 0);
+  let roll = Math.random() * total;
+  for (const item of items) {
+    roll -= Math.max(0.001, item.weight || 0);
+    if (roll <= 0) return item;
+  }
+  return items[0];
+}
+
+function pickStyledMove(lines, personalityId) {
+  if (!lines.length) return null;
+  const sorted = [...lines].sort((a, b) => b.cp - a.cp);
+  const cpBest = sorted[0].cp;
+
+  if (personalityId === "strategist") {
+    const top = sorted.slice(0, 3);
+    return top.reduce(
+      (best, line) => {
+        const drop = cpBest - line.cp;
+        if (!best || drop < best.drop) return { line, drop };
+        return best;
+      },
+      null,
+    )?.line;
+  }
+
+  if (personalityId === "tactician") {
+    const pool = sorted.filter((line) => line.cp >= cpBest - 80);
+    const weighted = pool.map((line, idx) => ({ ...line, weight: Math.max(1, 10 - idx * 1.5) }));
+    return weightedChoice(weighted);
+  }
+
+  if (personalityId === "trickster") {
+    const pool = sorted.filter((line) => line.cp >= cpBest - 60);
+    const weighted = pool.map((line, idx) => ({ ...line, weight: idx + 1 }));
+    return weightedChoice(weighted);
+  }
+
+  if (personalityId === "endgame-grinder") {
+    return sorted[0];
+  }
+
+  return sorted[0];
+}
+
 export async function initEngine() {
   if (ready) return;
   if (initPromise) return initPromise;
@@ -274,6 +357,41 @@ async function searchEvaluationOnce(fen, thinkMs) {
   return latestScore;
 }
 
+async function searchBestMoveStyledOnce(fen, thinkMs, personalityId) {
+  await initEngine();
+  await syncReady();
+
+  const { multipv, moveTime } = personalitySearchOptions(personalityId, thinkMs);
+  post(`setoption name MultiPV value ${multipv}`);
+  post(`position fen ${fen}`);
+  post(`go movetime ${moveTime}`);
+
+  const latestByPv = new Map();
+
+  while (true) {
+    const line = await waitForNextLine(
+      HARD_SEARCH_TIMEOUT_MS,
+      `Stockfish styled search timeout after ${HARD_SEARCH_TIMEOUT_MS}ms`,
+    );
+
+    const parsed = parseInfoMultiPv(line);
+    if (parsed) {
+      latestByPv.set(parsed.multipv, parsed);
+    }
+
+    if (line.startsWith("bestmove ")) {
+      const bestmove = line.split(/\s+/)[1];
+      if (!bestmove || bestmove === "(none)") {
+        throw new Error("Stockfish returned no legal bestmove");
+      }
+
+      const lines = [...latestByPv.values()];
+      const styled = pickStyledMove(lines, personalityId);
+      return styled?.move || bestmove;
+    }
+  }
+}
+
 export async function getBestMove(fen, thinkMs = DEFAULT_MOVE_TIME_MS) {
   if (!fen || typeof fen !== "string") {
     throw new Error("A FEN string is required for getBestMove");
@@ -313,4 +431,22 @@ export async function evaluatePosition(fen, thinkMs = 100) {
 export async function runSelfTest() {
   const startFen = "rn1qkbnr/pppb1ppp/3pp3/8/3PP3/2N2N2/PPP2PPP/R1BQKB1R w KQkq - 0 5";
   return getBestMove(startFen, DEFAULT_MOVE_TIME_MS);
+}
+
+export async function getBestMoveStyled(fen, personalityId = "strategist", thinkMs = DEFAULT_MOVE_TIME_MS) {
+  if (!fen || typeof fen !== "string") {
+    throw new Error("A FEN string is required for getBestMoveStyled");
+  }
+
+  return withQueue(async () => {
+    try {
+      return await searchBestMoveStyledOnce(fen, thinkMs, personalityId);
+    } catch (error) {
+      const isTimeout = /timeout/i.test(error?.message || "");
+      if (!isTimeout) throw error;
+
+      await restartEngine(error.message);
+      return searchBestMoveStyledOnce(fen, thinkMs, personalityId);
+    }
+  });
 }

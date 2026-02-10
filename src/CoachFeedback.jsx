@@ -1,10 +1,13 @@
 import React from "react";
 
 export default function CoachFeedback({ moves, youColor, result }) {
-  if (!moves.length) return null;
+  if (!moves.length) {
+    return <div className="text-sm text-neutral-400">Play a move to get live coaching tips.</div>;
+  }
+
   const yourMoves = moves.filter((m) => m.side === youColor);
   const last = yourMoves[yourMoves.length - 1];
-  if (!last) return null;
+  if (!last) return <div className="text-sm text-neutral-400">Waiting for your move…</div>;
 
   let feedback = "Solid move.";
   let tone = "neutral";
@@ -33,10 +36,14 @@ export default function CoachFeedback({ moves, youColor, result }) {
     tone = "neutral";
   }
 
-  return (
-    <div className={`p-4 rounded-2xl border mt-4 ${tone === "bad" ? "border-rose-500/40 bg-rose-900/20" : tone === "warn" ? "border-amber-500/40 bg-amber-900/20" : tone === "good" ? "border-emerald-500/40 bg-emerald-900/20" : "border-neutral-500/20 bg-neutral-900/20"}`}>
-      <div className="font-semibold text-lg mb-1">Coach says:</div>
-      <div className="text-sm">{feedback}</div>
-    </div>
-  );
+  const toneClass =
+    tone === "bad"
+      ? "text-rose-200"
+      : tone === "warn"
+      ? "text-amber-200"
+      : tone === "good"
+      ? "text-emerald-200"
+      : "text-neutral-200";
+
+  return <div className={`text-sm leading-relaxed ${toneClass}`}>{feedback}</div>;
 }
