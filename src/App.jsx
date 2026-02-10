@@ -570,7 +570,10 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
   const cplList = [];
   const moveBreakdown = [];
 
-  for (const snapshot of userMoveSnapshots) {
+  const YIELD_EVERY = 4;
+
+  for (let index = 0; index < userMoveSnapshots.length; index += 1) {
+    const snapshot = userMoveSnapshots[index];
     const moveLoss = await computeMoveLossVsBest(snapshot.fenBefore, moveToUci(snapshot.move), youColor, movetimeMs);
     const cpLoss = moveLoss.moveLossCp;
     cplList.push(cpLoss);
@@ -581,7 +584,13 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
       afterCp: moveLoss.afterCp,
       classification: classifyLoss(cpLoss),
       grade: moveLoss.grade,
+      catastrophicByMaterial: moveLoss.catastrophicByMaterial,
+      materialDelta: moveLoss.materialDelta,
     });
+
+    if ((index + 1) % YIELD_EVERY === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
   }
 
   return {
@@ -949,7 +958,7 @@ export default function App() {
     }));
 
     try {
-      const moveLoss = await computeMoveLossVsBest(fenBefore, moveToUci(move), youColor, 90);
+      const moveLoss = await computeMoveLossVsBest(fenBefore, moveToUci(move), youColor, 70);
 
       const cpl = moveLoss.moveLossCp;
       const bucket = coachBucketFromGradeLabel(moveLoss.grade);
@@ -997,7 +1006,7 @@ export default function App() {
     let cancelled = false;
 
     const playBotMove = async () => {
-      setStatus(ratingState.gamesRated < 5 ? "Calibrating…" : "Refining…");
+      setStatus("Bot thinking…");
 
       const legal = legalMoves(board, turn, castle);
       if (!legal.length) return;
@@ -1074,7 +1083,7 @@ export default function App() {
     const analysisSummary = await analyzeGameWithStockfish({
       moves: movesForGame,
       youColor,
-      movetimeMs: 100,
+      movetimeMs: 200,
     }).catch((error) => {
       console.error("Post-game analysis failed", error);
       return {
@@ -1083,7 +1092,12 @@ export default function App() {
       };
     });
 
-    const ratingUpdate = applyGameResult(ratingState, { opponentElo: botEloUsedThisGame, result: res, cplList: analysisSummary.cplList });
+    const ratingUpdate = applyGameResult(ratingState, {
+      opponentElo: botEloUsedThisGame,
+      result: res,
+      cplList: analysisSummary.cplList,
+      moveBreakdown: analysisSummary.moveBreakdown,
+    });
     const wasUncalibrated = ratingState.gamesRated === 0;
     setRatingState(ratingUpdate.nextState);
     setLastRatedSummary({

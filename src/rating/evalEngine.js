@@ -3,6 +3,16 @@ import { analyzeFenRaw } from "../stockfishEngine.js";
 
 const MATE_CP_BASE = 10000;
 const fenEvalCache = new Map();
+const fenEvalInflight = new Map();
+const MAX_CACHE_ENTRIES = 400;
+const PIECE_VALUES = {
+  p: 1,
+  n: 3,
+  b: 3,
+  r: 5,
+  q: 9,
+  k: 0,
+};
 
 function clampMateDistance(distance) {
   return Math.min(99, Math.abs(distance));
@@ -61,31 +71,68 @@ function gradeFromMoveLoss(moveLossCp) {
 
 export async function evaluateFenForPlayer(fen, playerColor = "w", movetimeMs = 100) {
   const fenUsed = String(fen);
-  const cacheKey = `${fenUsed}::${playerColor}`;
+  const moveTime = Math.max(30, Math.round(movetimeMs || 0));
+  const cacheKey = `${fenUsed}|${playerColor}|${moveTime}`;
 
   if (fenEvalCache.has(cacheKey)) {
-    return fenEvalCache.get(cacheKey);
+    const cached = fenEvalCache.get(cacheKey);
+    fenEvalCache.delete(cacheKey);
+    fenEvalCache.set(cacheKey, cached);
+    return cached;
   }
 
-  const raw = await analyzeFenRaw(fenUsed, { movetimeMs });
-  const sideToMove = sideToMoveFromFen(fenUsed);
-  const parsedScore = parseStockfishScore(raw?.score?.line || "");
-  const fallbackScore = raw?.score?.type === "mate"
-    ? { type: "mate", value: raw.score.value }
-    : { type: "cp", value: raw?.score?.value ?? raw?.score?.cp ?? 0 };
-  const score = parsedScore.type === "cp" && parsedScore.value === 0 && !raw?.score?.line ? fallbackScore : parsedScore;
+  if (fenEvalInflight.has(cacheKey)) {
+    return fenEvalInflight.get(cacheKey);
+  }
 
-  const whiteCp = scoreToCp(score, { sideToMove });
-  const playerCp = whiteCpToPlayerCp(whiteCp, playerColor);
+  const pending = (async () => {
+    const raw = await analyzeFenRaw(fenUsed, { movetimeMs: moveTime });
+    const sideToMove = sideToMoveFromFen(fenUsed);
+    const parsedScore = parseStockfishScore(raw?.score?.line || "");
+    const fallbackScore = raw?.score?.type === "mate"
+      ? { type: "mate", value: raw.score.value }
+      : { type: "cp", value: raw?.score?.value ?? raw?.score?.cp ?? 0 };
+    const score = parsedScore.type === "cp" && parsedScore.value === 0 && !raw?.score?.line ? fallbackScore : parsedScore;
 
-  const result = {
-    playerCp,
-    raw: score,
-    fenUsed,
-  };
+    const whiteCp = scoreToCp(score, { sideToMove });
+    const playerCp = whiteCpToPlayerCp(whiteCp, playerColor);
 
-  fenEvalCache.set(cacheKey, result);
-  return result;
+    const result = {
+      playerCp,
+      raw: score,
+      fenUsed,
+    };
+
+    fenEvalCache.set(cacheKey, result);
+    if (fenEvalCache.size > MAX_CACHE_ENTRIES) {
+      const oldestKey = fenEvalCache.keys().next().value;
+      if (oldestKey) fenEvalCache.delete(oldestKey);
+    }
+
+    return result;
+  })();
+
+  fenEvalInflight.set(cacheKey, pending);
+  try {
+    return await pending;
+  } finally {
+    fenEvalInflight.delete(cacheKey);
+  }
+}
+
+function materialScoreForColor(fen, color) {
+  const boardFen = String(fen || "").split(" ")[0] || "";
+  let score = 0;
+
+  for (const char of boardFen) {
+    const lower = char.toLowerCase();
+    const value = PIECE_VALUES[lower];
+    if (!value) continue;
+    const pieceColor = char === lower ? "b" : "w";
+    if (pieceColor === color) score += value;
+  }
+
+  return score;
 }
 
 function parseMoveForChess(chess, move) {
@@ -123,16 +170,25 @@ export async function computeMoveLossVsBest(fenBefore, move, playerColor, moveti
   const fenAfter = chess.fen();
   const after = await evaluateFenForPlayer(fenAfter, playerColor, movetimeMs);
 
+  const materialBefore = materialScoreForColor(fenBefore, playerColor);
+  const materialAfter = materialScoreForColor(fenAfter, playerColor);
+  const materialDelta = materialAfter - materialBefore;
+
   const moveLossCp = Math.max(0, Math.round(bestBefore.playerCp - after.playerCp));
+  const catastrophicByMaterial = moveLossCp > 600 && materialDelta <= -7;
 
   return {
     moveLossCp,
     bestBeforeCp: bestBefore.playerCp,
     afterCp: after.playerCp,
+    materialDelta,
+    catastrophicByMaterial,
+    fenAfter,
     grade: gradeFromMoveLoss(moveLossCp),
   };
 }
 
 export function clearEvalCache() {
   fenEvalCache.clear();
+  fenEvalInflight.clear();
 }
