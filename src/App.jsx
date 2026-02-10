@@ -1163,6 +1163,18 @@ export default function App() {
   const turnTone = result ? "neutral" : turn === youColor ? "good" : "warn";
 
   const resultTone = result?.yours === "win" ? "good" : result?.yours === "loss" ? "bad" : "neutral";
+  const hasRatedGames = ratingState.gamesRated > 0;
+  const currentGameNumber = ratingState.gamesRated + 1;
+
+  function resetAllProgress() {
+    const freshRatingState = getInitialRatingState();
+    reset();
+    setRatingState(freshRatingState);
+    setLastRatedSummary(null);
+    setLastGameSummaryForBot(null);
+    setDebugInfo(null);
+    localStorage.removeItem(RATING_STORAGE_KEY);
+  }
 
   return (
     <div className="min-h-screen text-neutral-100">
@@ -1197,6 +1209,9 @@ export default function App() {
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Pill tone="neutral">
+                    Game: <b>{currentGameNumber}</b>
+                  </Pill>
+                  <Pill tone="neutral">
                     You: <b>{colorToMoveName(youColor)}</b>
                   </Pill>
                   <Pill tone="neutral">
@@ -1218,7 +1233,13 @@ Mode: <b>Rated</b>
               <div className="rounded-2xl border border-sky-300/25 bg-sky-500/10 p-4 min-w-[260px] text-right">
                 <div className="text-xs uppercase tracking-wide text-sky-200/80">Estimated Elo</div>
                 <div className="text-2xl font-bold text-sky-100">
-                  {ratingState.playerElo} <span className="text-sm font-medium">({ratingState.rangeLow}–{ratingState.rangeHigh})</span>
+                  {hasRatedGames ? (
+                    <>
+                      {ratingState.playerElo} <span className="text-sm font-medium">({ratingState.rangeLow}–{ratingState.rangeHigh})</span>
+                    </>
+                  ) : (
+                    <span className="text-xl">Unknown (play game 1)</span>
+                  )}
                 </div>
                 <div className="text-xs text-sky-200/90 mt-1">Confidence: {ratingState.confidence}</div>
                 {!result ? <div className="text-xs text-sky-300/90 mt-1">Adjusting…</div> : null}
@@ -1231,11 +1252,19 @@ Mode: <b>Rated</b>
                 >
                   New game
                 </button>
+                <button
+                  onClick={resetAllProgress}
+                  className="px-4 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/30 transition"
+                >
+                  Reset history
+                </button>
               </div>
             </div>
 
             <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4">
-              <div className="text-sm sm:text-base font-medium text-sky-100">Range: {ratingState.rangeLow}–{ratingState.rangeHigh}</div>
+              <div className="text-sm sm:text-base font-medium text-sky-100">
+                Range: {hasRatedGames ? `${ratingState.rangeLow}–${ratingState.rangeHigh}` : "Unknown"}
+              </div>
               <div className="text-xs text-sky-200/90 mt-1">Confidence: {ratingState.confidence}</div>
               {lastRatedSummary ? (
                 <div className="text-xs text-sky-100 mt-2">
