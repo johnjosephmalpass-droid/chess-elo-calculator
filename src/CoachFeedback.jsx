@@ -11,17 +11,24 @@ export default function CoachFeedback({ moves, youColor, result }) {
 
   let feedback = "Solid move.";
   let tone = "neutral";
-  if (last.loss > 300) {
-    feedback = "Blunder! Try to avoid hanging pieces.";
+
+  if (last.pendingAnalysis) {
+    feedback = "Analyzing your last move…";
+    tone = "neutral";
+  } else if (last.classification === "blunder") {
+    feedback = "Blunder. You likely dropped major material or walked into tactics.";
     tone = "bad";
-  } else if (last.loss > 120) {
-    feedback = "Mistake. Look for better options.";
+  } else if (last.classification === "mistake") {
+    feedback = "Mistake. There was a clearly stronger continuation.";
     tone = "warn";
-  } else if (last.loss > 50) {
-    feedback = "Inaccuracy. Not the best, but not terrible.";
+  } else if (last.classification === "inaccuracy") {
+    feedback = "Inaccuracy. Playable, but you gave up some edge.";
     tone = "warn";
-  } else if (last.loss < 20) {
-    feedback = "Excellent! That's a top move.";
+  } else if (last.classification === "best") {
+    feedback = "Best move. That's engine-approved precision.";
+    tone = "good";
+  } else if (last.classification === "excellent") {
+    feedback = "Excellent move. Very close to best play.";
     tone = "good";
   }
 

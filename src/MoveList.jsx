@@ -5,13 +5,21 @@ export default function MoveList({ moves }) {
   return (
     <ol className="space-y-1.5">
       {moves.map((m, idx) => {
-        const tone = m.loss > 300 ? "text-rose-300" : m.loss > 120 ? "text-amber-300" : "text-emerald-300";
+        const tone =
+          m.pendingAnalysis
+            ? "text-neutral-300"
+            : m.classification === "blunder"
+            ? "text-rose-300"
+            : m.classification === "mistake" || m.classification === "inaccuracy"
+            ? "text-amber-300"
+            : "text-emerald-300";
+        const label = m.pendingAnalysis ? "analyzing…" : `${m.classification || "best"} · ${Math.round(m.loss || 0)}cp`;
         return (
-          <li key={idx} className="flex items-center justify-between gap-2">
+          <li key={m.id || idx} className="flex items-center justify-between gap-2">
             <span className="text-neutral-300">
               {idx + 1}. {m.side === "w" ? "W" : "B"} <span className="font-medium text-neutral-100">{m.from}-{m.to}{m.promo ? `=${m.promo.toUpperCase()}` : ""}</span>
             </span>
-            <span className={`text-xs ${tone}`}>loss {Math.round(m.loss)}cp</span>
+            <span className={`text-xs capitalize ${tone}`}>{label}</span>
           </li>
         );
       })}

@@ -21,6 +21,8 @@ import { Chess } from "chess.js";
 
 const FILES = "abcdefgh";
 const RANKS = "12345678";
+const LIVE_ANALYSIS_MOVETIME_MS = 120;
+
 
 function sqToIdx(sq) {
   const f = FILES.indexOf(sq[0]);
@@ -505,9 +507,9 @@ function heuristicLossForMove(boardBefore, mv, side, castle) {
   return Math.max(0, best - played);
 }
 
-async function stockfishLossForMove(boardBefore, mv, side, castle, plyCount, thinkMs = 90) {
+async function stockfishLossForMove(boardBefore, mv, side, castle, plyCount, thinkMs = LIVE_ANALYSIS_MOVETIME_MS) {
   const legal = legalMoves(boardBefore, side, castle);
-  if (!legal.length) return 0;
+  if (!legal.length) return { cpLoss: 0, classification: "best" };
 
   const fenBefore = boardToFen(boardBefore, side, castle, plyCount);
   const bestUci = await getBestMoveStyled(fenBefore, "endgame-grinder", thinkMs);
@@ -534,15 +536,19 @@ async function stockfishLossForMove(boardBefore, mv, side, castle, plyCount, thi
     evaluatePosition(bestFen, thinkMs),
   ]);
 
-  return Math.max(0, Math.round((playedEval?.cp || 0) - (bestEval?.cp || 0)));
+  const playedCp = playedEval?.cp || 0;
+  const bestCp = bestEval?.cp || 0;
+  const cpLoss = Math.max(0, Math.round(playedCp - bestCp));
+  return { cpLoss, classification: classifyLoss(cpLoss) };
 }
 
-async function lossForMove(boardBefore, mv, side, castle, plyCount) {
+async function analyzeMoveQuality(boardBefore, mv, side, castle, plyCount) {
   try {
     return await stockfishLossForMove(boardBefore, mv, side, castle, plyCount);
   } catch (error) {
     console.warn("Stockfish live move-loss failed, using heuristic fallback", error);
-    return heuristicLossForMove(boardBefore, mv, side, castle);
+    const cpLoss = heuristicLossForMove(boardBefore, mv, side, castle);
+    return { cpLoss, classification: classifyLoss(cpLoss) };
   }
 }
 
@@ -607,6 +613,18 @@ function classifyLoss(cpLoss) {
   if (cpLoss <= 180) return "inaccuracy";
   if (cpLoss <= 320) return "mistake";
   return "blunder";
+}
+
+function moveScoreFromCpLoss(cpLoss) {
+  const safeLoss = Math.max(0, cpLoss);
+  const score = 100 * Math.exp(-safeLoss / 420);
+  return clamp(Math.round(score), 0, 100);
+}
+
+function gameAccuracyFromMoveLosses(moveLosses) {
+  if (!moveLosses.length) return 100;
+  const total = moveLosses.reduce((sum, loss) => sum + moveScoreFromCpLoss(loss), 0);
+  return Math.round(total / moveLosses.length);
 }
 
 function sideToMoveFromFen(fen) {
@@ -938,7 +956,8 @@ export default function App() {
   const [selfTestError, setSelfTestError] = useState("");
   const [selfTestBusy, setSelfTestBusy] = useState(false);
   const [themeId, setThemeId] = useState("nebula");
-  const [moves, setMoves] = useState([]); // {from,to,promo,side,loss}
+  const [moves, setMoves] = useState([]); // {from,to,promo,side,loss,classification,pendingAnalysis}
+  const [analysisQueueBusy, setAnalysisQueueBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [lastRatedSummary, setLastRatedSummary] = useState(null);
   const [lastGameSummaryForBot, setLastGameSummaryForBot] = useState(initialRatingState.lastGameSummary || null);
@@ -1002,7 +1021,10 @@ export default function App() {
       if (yourMoves[i].loss < 70) streak += 1;
       else break;
     }
-    const accuracy = clamp(Math.round(100 - (yourSummary.avgLoss || 0) / 2), 35, 99);
+    const moveLosses = yourMoves
+      .map((m) => m.loss)
+      .filter((loss) => Number.isFinite(loss));
+    const accuracy = gameAccuracyFromMoveLosses(moveLosses);
     return { recentAvg, streak, accuracy };
   }, [moves, youColor, yourSummary.avgLoss]);
 
@@ -1032,10 +1054,67 @@ export default function App() {
   }, [personalityId, personality]);
 
   useEffect(() => {
-    if (!botGlowSquare) return undefined;
-    const timer = setTimeout(() => setBotGlowSquare(null), 300);
-    return () => clearTimeout(timer);
-  }, [botGlowSquare]);
+    if (analysisQueueBusy || result) return;
+    const pendingMove = moves.find((m) => m.side === youColor && m.pendingAnalysis);
+    if (!pendingMove) return;
+
+    let cancelled = false;
+    setAnalysisQueueBusy(true);
+
+    const runAnalysis = async () => {
+      const boardBefore = pendingMove.boardBefore ? pendingMove.boardBefore.map((row) => row.map((cell) => (cell ? { ...cell } : null))) : null;
+      const castleBefore = pendingMove.castleBefore ? { ...pendingMove.castleBefore } : null;
+      if (!boardBefore || !castleBefore) {
+        setMoves((prev) =>
+          prev.map((m) =>
+            m.id === pendingMove.id
+              ? { ...m, pendingAnalysis: false, boardBefore: undefined, castleBefore: undefined }
+              : m,
+          ),
+        );
+        setAnalysisQueueBusy(false);
+        return;
+      }
+
+      try {
+        const analysisResult = await analyzeMoveQuality(
+          boardBefore,
+          pendingMove,
+          pendingMove.side,
+          castleBefore,
+          pendingMove.plyBefore,
+        );
+        if (cancelled) return;
+
+        setMoves((prev) =>
+          prev.map((m) =>
+            m.id === pendingMove.id
+              ? {
+                  ...m,
+                  loss: analysisResult.cpLoss,
+                  classification: analysisResult.classification,
+                  pendingAnalysis: false,
+                  boardBefore: undefined,
+                  castleBefore: undefined,
+                }
+              : m,
+          ),
+        );
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Live move analysis failed", error);
+        setMoves((prev) => prev.map((m) => (m.id === pendingMove.id ? { ...m, pendingAnalysis: false } : m)));
+      } finally {
+        if (!cancelled) setAnalysisQueueBusy(false);
+      }
+    };
+
+    runAnalysis();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [analysisQueueBusy, moves, youColor, result]);
 
   async function handleSelfTest() {
     setSelfTestBusy(true);
@@ -1086,7 +1165,6 @@ export default function App() {
           return;
         }
 
-        const loss = await lossForMove(board, mv, turn, castle, moves.length);
         const nextCastle = updateCastleRights(castle, board, mv);
 
         const nb = applyMove(board, mv);
@@ -1095,7 +1173,7 @@ export default function App() {
 
         setBoard(nb);
         setCastle(nextCastle);
-        setMoves((prev) => [...prev, { ...mv, side: turn, loss }]);
+        setMoves((prev) => [...prev, { ...mv, side: turn, loss: 0, classification: "best", pendingAnalysis: false }]);
         setTurn(nextTurn);
         setSelected(null);
         setLastMove({ from: mv.from, to: mv.to });
@@ -1104,7 +1182,7 @@ export default function App() {
         setBotStatusLine(personality.quips[Math.floor(Math.random() * personality.quips.length)]);
 
         if (gr) {
-          const nextMoves = [...moves, { ...mv, side: turn, loss }];
+          const nextMoves = [...moves, { ...mv, side: turn, loss: 0, classification: "best", pendingAnalysis: false }];
           finishGame(gr, nextMoves);
         }
         else setStatus(`Your move (${colorToMoveName(youColor)})`);
@@ -1222,23 +1300,38 @@ export default function App() {
       }
     }
 
-    const loss = await lossForMove(board, candidate, turn, castle, moves.length);
+    const boardSnapshot = cloneBoard(board);
+    const castleSnapshot = { ...castle };
+    const moveId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
     const nextCastle = updateCastleRights(castle, board, candidate);
 
     const nb = applyMove(board, candidate);
     const nextTurn = opposite(turn);
     const gr = gameResult(nb, nextTurn, nextCastle);
 
+    const pendingMove = {
+      ...candidate,
+      id: moveId,
+      side: turn,
+      loss: 0,
+      classification: "best",
+      pendingAnalysis: true,
+      boardBefore: boardSnapshot,
+      castleBefore: castleSnapshot,
+      plyBefore: moves.length,
+    };
+
     setBoard(nb);
     setCastle(nextCastle);
-    setMoves((prev) => [...prev, { ...candidate, side: turn, loss }]);
+    setMoves((prev) => [...prev, pendingMove]);
     setTurn(nextTurn);
     setSelected(null);
     setLastMove({ from: candidate.from, to: candidate.to });
     setCheckedKingSquare(getCheckedKingSquare(nb, nextTurn));
 
     if (gr) {
-      const nextMoves = [...moves, { ...candidate, side: turn, loss }];
+      const nextMoves = [...moves, { ...pendingMove }];
       finishGame(gr, nextMoves);
     }
   }

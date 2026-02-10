@@ -8,6 +8,7 @@ let ready = false;
 let pendingLines = [];
 let lineWaiters = [];
 let queue = Promise.resolve();
+const evaluationCache = new Map();
 
 let messageHandler = null;
 let errorHandler = null;
@@ -415,15 +416,25 @@ export async function evaluatePosition(fen, thinkMs = 100) {
     throw new Error("A FEN string is required for evaluatePosition");
   }
 
+  const moveTime = Math.max(50, Math.round(thinkMs ?? DEFAULT_MOVE_TIME_MS));
+  const cacheKey = `${fen}|${moveTime}`;
+  if (evaluationCache.has(cacheKey)) {
+    return evaluationCache.get(cacheKey);
+  }
+
   return withQueue(async () => {
     try {
-      return await searchEvaluationOnce(fen, thinkMs);
+      const result = await searchEvaluationOnce(fen, moveTime);
+      evaluationCache.set(cacheKey, result);
+      return result;
     } catch (error) {
       const isTimeout = /timeout/i.test(error?.message || "");
       if (!isTimeout) throw error;
 
       await restartEngine(error.message);
-      return searchEvaluationOnce(fen, thinkMs);
+      const result = await searchEvaluationOnce(fen, moveTime);
+      evaluationCache.set(cacheKey, result);
+      return result;
     }
   });
 }
