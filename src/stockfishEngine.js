@@ -1,3 +1,5 @@
+// src/stockfishEngine.js
+
 let worker = null;
 let initPromise = null;
 let ready = false;
@@ -40,22 +42,38 @@ function flushQueue() {
 export function initEngine() {
   if (initPromise) return initPromise;
 
+  console.log("[SF] initEngine() called");
+
   initPromise = new Promise((resolve, reject) => {
     try {
       worker = new Worker(new URL("./stockfish.worker.js", import.meta.url), {
-        type: "classic",
+        type: "classic", // required for importScripts
       });
+      console.log("[SF] Worker created");
     } catch (error) {
+      console.error("[SF] Worker failed to create", error);
       reject(error);
       return;
     }
 
+    // Prevent "thinking forever" if engine never becomes ready
+    const timeout = setTimeout(() => {
+      console.error("[SF] init timeout – no readyok");
+      reject(new Error("Stockfish init timed out (no readyok)."));
+    }, 6000);
+
     worker.onmessage = (event) => {
-      const line = typeof event.data === "string" ? event.data : "";
+      // Some builds send { data: "..." } inside event.data; we accept both.
+      const line =
+        typeof event.data === "string"
+          ? event.data
+          : typeof event.data?.data === "string"
+          ? event.data.data
+          : "";
+
       if (!line) return;
 
-      // Debug (uncomment to see engine traffic)
-      // console.log("SF>", line);
+      console.log("SF>", line);
 
       if (line === "uciok") {
         post("isready");
@@ -63,6 +81,7 @@ export function initEngine() {
       }
 
       if (line === "readyok") {
+        clearTimeout(timeout);
         ready = true;
         applyStrength(DEFAULT_STRENGTH);
         resolve();
@@ -75,22 +94,30 @@ export function initEngine() {
         const request = pendingRequest;
         pendingRequest = null;
 
-        if (!bestmove || bestmove === "(none)") request.reject(new Error("Stockfish did not return a legal move"));
-        else request.resolve(bestmove);
-
+        if (!bestmove || bestmove === "(none)") {
+          request.reject(new Error("Stockfish did not return a legal move"));
+        } else {
+          request.resolve(bestmove);
+        }
         flushQueue();
       }
     };
 
     worker.onerror = (error) => {
+      console.error("[SF] Worker error", error);
+      clearTimeout(timeout);
+
       if (!ready) reject(error);
+
       if (pendingRequest) {
         pendingRequest.reject(error);
         pendingRequest = null;
       }
+
       while (requestQueue.length) requestQueue.shift().reject(error);
     };
 
+    // Kick off UCI handshake
     post("uci");
   });
 
@@ -115,4 +142,3 @@ export function getBestMove(fen, thinkMs = DEFAULT_THINK_MS) {
 export function setStrength(options = {}) {
   initEngine().then(() => applyStrength(options));
 }
-
