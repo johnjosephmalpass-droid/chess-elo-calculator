@@ -8,9 +8,7 @@ const DEFAULT_THINK_MS = 350;
 const DEFAULT_STRENGTH = { skillLevel: 12 };
 
 function post(cmd) {
-  if (!worker) {
-    throw new Error("Stockfish engine is not initialized");
-  }
+  if (!worker) throw new Error("Stockfish engine is not initialized");
   worker.postMessage(cmd);
 }
 
@@ -44,7 +42,9 @@ export function initEngine() {
 
   initPromise = new Promise((resolve, reject) => {
     try {
-      worker = new Worker("/stockfish/stockfish.js");
+      worker = new Worker(new URL("./stockfish.worker.js", import.meta.url), {
+        type: "classic",
+      });
     } catch (error) {
       reject(error);
       return;
@@ -53,6 +53,9 @@ export function initEngine() {
     worker.onmessage = (event) => {
       const line = typeof event.data === "string" ? event.data : "";
       if (!line) return;
+
+      // Debug (uncomment to see engine traffic)
+      // console.log("SF>", line);
 
       if (line === "uciok") {
         post("isready");
@@ -72,26 +75,20 @@ export function initEngine() {
         const request = pendingRequest;
         pendingRequest = null;
 
-        if (!bestmove || bestmove === "(none)") {
-          request.reject(new Error("Stockfish did not return a legal move"));
-        } else {
-          request.resolve(bestmove);
-        }
+        if (!bestmove || bestmove === "(none)") request.reject(new Error("Stockfish did not return a legal move"));
+        else request.resolve(bestmove);
+
         flushQueue();
       }
     };
 
     worker.onerror = (error) => {
-      if (!ready) {
-        reject(error);
-      }
+      if (!ready) reject(error);
       if (pendingRequest) {
         pendingRequest.reject(error);
         pendingRequest = null;
       }
-      while (requestQueue.length) {
-        requestQueue.shift().reject(error);
-      }
+      while (requestQueue.length) requestQueue.shift().reject(error);
     };
 
     post("uci");
@@ -118,3 +115,4 @@ export function getBestMove(fen, thinkMs = DEFAULT_THINK_MS) {
 export function setStrength(options = {}) {
   initEngine().then(() => applyStrength(options));
 }
+
