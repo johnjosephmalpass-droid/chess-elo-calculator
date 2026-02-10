@@ -1,5 +1,6 @@
 const DEFAULT_MOVE_TIME_MS = 250;
 const HARD_SEARCH_TIMEOUT_MS = 2000;
+const MATE_CP_BASE = 10000;
 
 let worker = null;
 let initPromise = null;
@@ -61,6 +62,32 @@ function waitForLine(predicate, timeoutMs, timeoutLabel) {
   });
 }
 
+function waitForNextLine(timeoutMs, timeoutLabel) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(timeoutLabel));
+    }, timeoutMs);
+
+    if (pendingLines.length) {
+      const line = pendingLines.shift();
+      clearTimeout(timeout);
+      resolve(line);
+      return;
+    }
+
+    lineWaiters.push({
+      resolve: (line) => {
+        clearTimeout(timeout);
+        resolve(line);
+      },
+      reject: (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    });
+  });
+}
+
 function post(cmd) {
   if (!worker) throw new Error("Stockfish worker is not initialized");
   worker.postMessage(cmd);
@@ -101,6 +128,23 @@ async function syncReady() {
 
 function skillToLevel(skillLevel) {
   return Math.max(0, Math.min(20, Math.round(skillLevel ?? 12)));
+}
+
+function parseInfoScore(line) {
+  if (!line.startsWith("info ")) return null;
+
+  const mateMatch = line.match(/\bscore mate\s+(-?\d+)/);
+  if (mateMatch) {
+    const mateDistance = Number.parseInt(mateMatch[1], 10);
+    const sign = Math.sign(mateDistance || 1);
+    const cp = sign * (MATE_CP_BASE - Math.min(99, Math.abs(mateDistance)) * 100);
+    return { type: "mate", value: mateDistance, cp };
+  }
+
+  const cpMatch = line.match(/\bscore cp\s+(-?\d+)/);
+  if (!cpMatch) return null;
+  const cp = Number.parseInt(cpMatch[1], 10);
+  return { type: "cp", value: cp, cp };
 }
 
 export async function initEngine() {
@@ -197,6 +241,39 @@ async function searchBestMoveOnce(fen, thinkMs) {
   return bestmove;
 }
 
+async function searchEvaluationOnce(fen, thinkMs) {
+  await initEngine();
+  await syncReady();
+
+  const moveTime = Math.max(50, Math.round(thinkMs ?? DEFAULT_MOVE_TIME_MS));
+  post(`position fen ${fen}`);
+  post(`go movetime ${moveTime}`);
+
+  let latestScore = null;
+
+  while (true) {
+    const line = await waitForNextLine(
+      HARD_SEARCH_TIMEOUT_MS,
+      `Stockfish evaluation timeout after ${HARD_SEARCH_TIMEOUT_MS}ms`,
+    );
+
+    const parsed = parseInfoScore(line);
+    if (parsed) {
+      latestScore = parsed;
+    }
+
+    if (line.startsWith("bestmove ")) {
+      break;
+    }
+  }
+
+  if (!latestScore) {
+    return { type: "cp", value: 0, cp: 0 };
+  }
+
+  return latestScore;
+}
+
 export async function getBestMove(fen, thinkMs = DEFAULT_MOVE_TIME_MS) {
   if (!fen || typeof fen !== "string") {
     throw new Error("A FEN string is required for getBestMove");
@@ -211,6 +288,24 @@ export async function getBestMove(fen, thinkMs = DEFAULT_MOVE_TIME_MS) {
 
       await restartEngine(error.message);
       return searchBestMoveOnce(fen, thinkMs);
+    }
+  });
+}
+
+export async function evaluatePosition(fen, thinkMs = 100) {
+  if (!fen || typeof fen !== "string") {
+    throw new Error("A FEN string is required for evaluatePosition");
+  }
+
+  return withQueue(async () => {
+    try {
+      return await searchEvaluationOnce(fen, thinkMs);
+    } catch (error) {
+      const isTimeout = /timeout/i.test(error?.message || "");
+      if (!isTimeout) throw error;
+
+      await restartEngine(error.message);
+      return searchEvaluationOnce(fen, thinkMs);
     }
   });
 }

@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachFeedback from "./CoachFeedback";
-import { getBestMove, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
+import { evaluatePosition, getBestMove, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
 import {
   chooseBotElo,
   getConfidenceLabel,
   getInitialRatingState,
-  getUncertainty,
   mapMovetimeFromElo,
   updatePlayerElo,
 } from "./ratingSystem.js";
+import { Chess } from "chess.js";
 
 
 /**
@@ -549,6 +549,107 @@ function parseUciMove(uci) {
   };
 }
 
+function moveToUci(move) {
+  return `${move.from}${move.to}${move.promo || ""}`;
+}
+
+function classifyLoss(cpLoss) {
+  if (cpLoss >= 300) return "blunder";
+  if (cpLoss >= 150) return "mistake";
+  if (cpLoss >= 50) return "inaccuracy";
+  return "ok";
+}
+
+function sideToMoveFromFen(fen) {
+  return fen.split(" ")[1] || "w";
+}
+
+function scoreFromUserPerspective(scoreObj, fen, youColor) {
+  const cp = scoreObj?.cp ?? 0;
+  const sideToMove = sideToMoveFromFen(fen);
+  return sideToMove === youColor ? cp : -cp;
+}
+
+async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
+  const chess = new Chess();
+  const maxPlies = 40;
+  const selectedMoves = moves.slice(0, maxPlies);
+
+  const userMoveSnapshots = [];
+
+  for (const move of selectedMoves) {
+    const fenBefore = chess.fen();
+    const parsed = chess.move({ from: move.from, to: move.to, promotion: move.promo || undefined });
+    if (!parsed) continue;
+    const fenAfter = chess.fen();
+    if (move.side === youColor) {
+      userMoveSnapshots.push({ move, fenBefore, fenAfter });
+    }
+  }
+
+  if (!userMoveSnapshots.length) {
+    return {
+      movesAnalyzed: 0,
+      acpl: 0,
+      blunders: 0,
+      mistakes: 0,
+      inaccuracies: 0,
+      accuracy: 100,
+      moveBreakdown: [],
+      mateSeen: false,
+      endedQuickly: true,
+    };
+  }
+
+  const moveBreakdown = [];
+  let totalLoss = 0;
+  let blunders = 0;
+  let mistakes = 0;
+  let inaccuracies = 0;
+  let mateSeen = false;
+
+  for (const snapshot of userMoveSnapshots) {
+    const before = await evaluatePosition(snapshot.fenBefore, movetimeMs);
+    const after = await evaluatePosition(snapshot.fenAfter, movetimeMs);
+
+    if (before.type === "mate" || after.type === "mate") mateSeen = true;
+
+    const scoreBefore = scoreFromUserPerspective(before, snapshot.fenBefore, youColor);
+    const scoreAfter = scoreFromUserPerspective(after, snapshot.fenAfter, youColor);
+    const cpLoss = Math.max(0, Math.round(scoreBefore - scoreAfter));
+    const classification = classifyLoss(cpLoss);
+
+    if (classification === "blunder") blunders += 1;
+    else if (classification === "mistake") mistakes += 1;
+    else if (classification === "inaccuracy") inaccuracies += 1;
+
+    totalLoss += cpLoss;
+    moveBreakdown.push({
+      move: moveToUci(snapshot.move),
+      cpLoss,
+      scoreBefore,
+      scoreAfter,
+      classification,
+    });
+  }
+
+  const movesAnalyzed = moveBreakdown.length;
+  const acpl = movesAnalyzed ? Math.round(totalLoss / movesAnalyzed) : 0;
+  const accuracy = clamp(Math.round(100 - acpl * 0.45 - blunders * 5 - mistakes * 2), 20, 99);
+
+  return {
+    movesAnalyzed,
+    acpl,
+    blunders,
+    mistakes,
+    inaccuracies,
+    accuracy,
+    moveBreakdown,
+    mateSeen,
+    endedQuickly: selectedMoves.length < 20,
+  };
+}
+
 const RATING_STORAGE_KEY = "chess-elo-calculator:rating-state";
 
 const THEMES = [
@@ -755,6 +856,21 @@ function Pill({ children, tone = "neutral" }) {
 }
 
 export default function App() {
+  const initialRatingState = useMemo(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(RATING_STORAGE_KEY) || "null");
+      return parsed && typeof parsed.playerElo === "number" && Number.isFinite(parsed.gamesRated)
+        ? {
+            ...getInitialRatingState(),
+            ...parsed,
+            confidence: getConfidenceLabel(parsed.gamesRated || 0),
+          }
+        : getInitialRatingState();
+    } catch {
+      return getInitialRatingState();
+    }
+  }, []);
+
   const [board, setBoard] = useState(makeStartBoard);
   const [turn, setTurn] = useState("w");
   const [selected, setSelected] = useState(null);
@@ -768,22 +884,9 @@ export default function App() {
   const [moves, setMoves] = useState([]); // {from,to,promo,side,loss}
   const [result, setResult] = useState(null);
   const [lastRatedSummary, setLastRatedSummary] = useState(null);
-  const [lastGameSummaryForBot, setLastGameSummaryForBot] = useState(null);
+  const [lastGameSummaryForBot, setLastGameSummaryForBot] = useState(initialRatingState.lastGameSummary || null);
   const [debugInfo, setDebugInfo] = useState(null);
-  const [ratingState, setRatingState] = useState(() => {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(RATING_STORAGE_KEY) || "null");
-      return parsed && typeof parsed.playerElo === "number" && Number.isFinite(parsed.gamesRated)
-        ? {
-            ...getInitialRatingState(),
-            ...parsed,
-            confidence: getConfidenceLabel(parsed.gamesRated || 0),
-          }
-        : getInitialRatingState();
-    } catch {
-      return getInitialRatingState();
-    }
-  });
+  const [ratingState, setRatingState] = useState(initialRatingState);
 
   // castling rights
   const [castle, setCastle] = useState({ wK: true, wQ: true, bK: true, bQ: true });
@@ -923,7 +1026,10 @@ export default function App() {
         setTurn(nextTurn);
         setSelected(null);
 
-        if (gr) finishGame(gr, nb, nextTurn, nextCastle);
+        if (gr) {
+          const nextMoves = [...moves, { ...mv, side: turn, loss }];
+          finishGame(gr, nextMoves);
+        }
         else setStatus(`Your move (${colorToMoveName(youColor)})`);
       } catch (error) {
         console.error("Bot move failed", error);
@@ -938,7 +1044,7 @@ export default function App() {
     };
   }, [turn, botPlays, board, result, castle, youColor, personality, moves.length, currentMoveTimeMs, ratingState.gamesRated]);
 
-  function finishGame(gr, finalBoard, nextTurn, nextCastle) {
+  async function finishGame(gr, movesForGame) {
     let resText = "Draw";
     let res = "draw";
     if (gr.type === "checkmate") {
@@ -952,25 +1058,44 @@ export default function App() {
     setResult({ ...gr, text: resText, yours: res });
     setStatus(resText);
 
-    const yourMoves = moves.filter((m) => m.side === youColor);
-    const movesPlayed = yourMoves.length;
-    const avgLoss = movesPlayed
-      ? Math.round(yourMoves.reduce((a, m) => a + m.loss, 0) / movesPlayed)
-      : 0;
-    const blunders = yourMoves.filter((m) => m.loss > 300).length;
+    const analysisSummary = await analyzeGameWithStockfish({
+      moves: movesForGame,
+      youColor,
+      movetimeMs: 100,
+    }).catch((error) => {
+      console.error("Post-game analysis failed", error);
+      return {
+        movesAnalyzed: 0,
+        acpl: 0,
+        blunders: 0,
+        mistakes: 0,
+        inaccuracies: 0,
+        accuracy: 50,
+        moveBreakdown: [],
+        mateSeen: false,
+        endedQuickly: true,
+      };
+    });
 
-    const ratingUpdate = updatePlayerElo(ratingState, botEloUsedThisGame, res, { avgLoss, blunders });
+    const ratingUpdate = updatePlayerElo(ratingState, botEloUsedThisGame, res, analysisSummary);
     setRatingState(ratingUpdate.nextState);
     setLastRatedSummary({
       playerElo: ratingUpdate.nextState.playerElo,
       uncertainty: ratingUpdate.summary.uncertainty,
       confidence: ratingUpdate.summary.confidence,
+      rangeLow: ratingUpdate.nextState.rangeLow,
+      rangeHigh: ratingUpdate.nextState.rangeHigh,
+      performanceElo: ratingUpdate.summary.performanceElo,
     });
-    setLastGameSummaryForBot({ result: res, avgLoss, blunders });
+    setLastGameSummaryForBot(ratingUpdate.nextState.lastGameSummary);
     setDebugInfo({
       botEloUsedThisGame,
       expectedScore: ratingUpdate.summary.expectedScore,
       kFactor: ratingUpdate.summary.kFactor,
+      performanceElo: ratingUpdate.summary.performanceElo,
+      alpha: ratingUpdate.summary.alpha,
+      clampLow: ratingUpdate.summary.clampedLow,
+      clampHigh: ratingUpdate.summary.clampedHigh,
     });
   }
 
@@ -980,7 +1105,6 @@ export default function App() {
     setSelected(null);
     setMoves([]);
     setResult(null);
-    setLastRatedSummary(null);
     setCastle({ wK: true, wQ: true, bK: true, bQ: true });
     setStatus(`Your move (${colorToMoveName(youColor)})`);
   }
@@ -1029,7 +1153,10 @@ export default function App() {
     setTurn(nextTurn);
     setSelected(null);
 
-    if (gr) finishGame(gr, nb, nextTurn, nextCastle);
+    if (gr) {
+      const nextMoves = [...moves, { ...candidate, side: turn, loss }];
+      finishGame(gr, nextMoves);
+    }
   }
 
   const turnTone = result ? "neutral" : turn === youColor ? "good" : "warn";
@@ -1087,6 +1214,15 @@ Mode: <b>Rated</b>
                 </div>
               </div>
 
+              <div className="rounded-2xl border border-sky-300/25 bg-sky-500/10 p-4 min-w-[260px] text-right">
+                <div className="text-xs uppercase tracking-wide text-sky-200/80">Estimated Elo</div>
+                <div className="text-2xl font-bold text-sky-100">
+                  {ratingState.playerElo} <span className="text-sm font-medium">({ratingState.rangeLow}–{ratingState.rangeHigh})</span>
+                </div>
+                <div className="text-xs text-sky-200/90 mt-1">Confidence: {ratingState.confidence}</div>
+                {!result ? <div className="text-xs text-sky-300/90 mt-1">Adjusting…</div> : null}
+              </div>
+
               <div className="flex gap-2">
                 <button
                   onClick={reset}
@@ -1098,20 +1234,24 @@ Mode: <b>Rated</b>
             </div>
 
             <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4">
-              <div className="text-sm sm:text-base font-medium text-sky-100">
-                {ratingState.gamesRated < 5
-                  ? `Calibrating… Play ${5 - ratingState.gamesRated} more rated games to get your Elo.`
-                  : `Elo estimate: ${ratingState.playerElo} (±${getUncertainty(ratingState.gamesRated)}). Keep playing to refine.`}
-              </div>
-              <div className="text-xs text-sky-200/90 mt-1">Confidence: {getConfidenceLabel(ratingState.gamesRated)}</div>
+              <div className="text-sm sm:text-base font-medium text-sky-100">Range: {ratingState.rangeLow}–{ratingState.rangeHigh}</div>
+              <div className="text-xs text-sky-200/90 mt-1">Confidence: {ratingState.confidence}</div>
               {lastRatedSummary ? (
                 <div className="text-xs text-sky-100 mt-2">
-                  Updated estimate: {lastRatedSummary.playerElo} (±{lastRatedSummary.uncertainty})
+                  Updated estimate: {lastRatedSummary.playerElo} ({lastRatedSummary.rangeLow}–{lastRatedSummary.rangeHigh})
                 </div>
+              ) : null}
+              {ratingState.lastGameSummary ? (
+                <details className="mt-2 text-xs text-sky-100/95">
+                  <summary className="cursor-pointer">Last game</summary>
+                  <div className="mt-1">
+                    vs unknown • Result: {ratingState.lastGameSummary.result} • ACPL: {ratingState.lastGameSummary.acpl} • Blunders: {ratingState.lastGameSummary.blunders} • Performance: {ratingState.lastGameSummary.performanceElo} (±{ratingState.lastGameSummary.performanceRange?.halfWidth || 200})
+                  </div>
+                </details>
               ) : null}
               {isDebug && debugInfo ? (
                 <div className="text-xs text-sky-200 mt-2">
-                  debug — botEloUsedThisGame: {debugInfo.botEloUsedThisGame} · expectedScore: {debugInfo.expectedScore.toFixed(3)} · K: {debugInfo.kFactor}
+                  debug — botEloUsedThisGame: {debugInfo.botEloUsedThisGame} · performanceElo: {debugInfo.performanceElo} · expectedScore: {debugInfo.expectedScore.toFixed(3)} · K: {debugInfo.kFactor} · alpha: {debugInfo.alpha.toFixed(2)} · clamp: {debugInfo.clampLow}..{debugInfo.clampHigh}
                 </div>
               ) : null}
             </div>
