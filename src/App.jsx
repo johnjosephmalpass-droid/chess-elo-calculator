@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachFeedback from "./CoachFeedback";
-import { evaluatePosition, getBestMove, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
+import { evaluatePosition, getBestMoveStyled, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
 import {
   chooseBotElo,
   getConfidenceLabel,
@@ -549,6 +549,12 @@ function parseUciMove(uci) {
   };
 }
 
+function getCheckedKingSquare(board, sideToMove) {
+  if (!inCheck(board, sideToMove)) return null;
+  const kp = kingPos(board, sideToMove);
+  return kp ? idxToSq(kp.f, kp.r) : null;
+}
+
 function moveToUci(move) {
   return `${move.from}${move.to}${move.promo || ""}`;
 }
@@ -651,6 +657,7 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
 }
 
 const RATING_STORAGE_KEY = "chess-elo-calculator:rating-state";
+const PERSONALITY_STORAGE_KEY = "chess-elo-calculator:bot-personality";
 
 const THEMES = [
   {
@@ -712,61 +719,29 @@ const BOT_PERSONALITIES = [
     id: "strategist",
     name: "The Strategist",
     emoji: "🧭",
-    tagline: "Plays clean, steady, and patient.",
-    strengthBias: 6,
-    chaos: 0.2,
-    blunderChance: 0.0,
-    quips: [
-      "Small edges add up.",
-      "Every pawn matters. So does every tempo.",
-      "Let’s keep it tidy.",
-      "Precision > flash.",
-    ],
+    tagline: "Clean, steady, and positional play.",
+    quips: ["Small edges add up.", "Patience wins.", "Control the center."],
+  },
+  {
+    id: "tactician",
+    name: "The Tactician",
+    emoji: "🔥",
+    tagline: "Aggressive lines and tactical pressure.",
+    quips: ["Let’s complicate.", "Tactics decide."],
   },
   {
     id: "trickster",
     name: "The Trickster",
     emoji: "🎭",
-    tagline: "Sets traps and gambits all day.",
-    strengthBias: 0,
-    chaos: 0.55,
-    blunderChance: 0.04,
-    quips: [
-      "A trap a day keeps the Elo away.",
-      "Sacrifices are just spicy investments.",
-      "If you blink, you drop a piece.",
-      "Let’s make this messy.",
-    ],
+    tagline: "Offbeat but still dangerous moves.",
+    quips: ["Unexpected.", "Offbeat is best."],
   },
   {
-    id: "juggernaut",
-    name: "The Juggernaut",
-    emoji: "🧱",
-    tagline: "Slow squeeze, endgame pressure.",
-    strengthBias: 10,
-    chaos: 0.15,
-    blunderChance: 0.0,
-    quips: [
-      "We grind until something cracks.",
-      "You can’t out-sprint a wall.",
-      "Endgames are my playground.",
-      "Position first, tactics later.",
-    ],
-  },
-  {
-    id: "chaos",
-    name: "The Chaos Gremlin",
-    emoji: "🌀",
-    tagline: "Wild lines, high variance.",
-    strengthBias: -6,
-    chaos: 0.9,
-    blunderChance: 0.08,
-    quips: [
-      "Who needs theory when you have vibes?",
-      "Let’s roll the dice.",
-      "I’m not losing, I’m experimenting.",
-      "Chaos is a ladder.",
-    ],
+    id: "endgame-grinder",
+    name: "The Endgame Grinder",
+    emoji: "🧊",
+    tagline: "Simplifies and squeezes advantages.",
+    quips: ["Endgames are won slowly."],
   },
 ];
 
@@ -887,15 +862,25 @@ export default function App() {
   const [lastGameSummaryForBot, setLastGameSummaryForBot] = useState(initialRatingState.lastGameSummary || null);
   const [debugInfo, setDebugInfo] = useState(null);
   const [ratingState, setRatingState] = useState(initialRatingState);
+  const [personalityId, setPersonalityId] = useState(() => {
+    const saved = localStorage.getItem(PERSONALITY_STORAGE_KEY);
+    return BOT_PERSONALITIES.some((p) => p.id === saved) ? saved : "strategist";
+  });
+  const [botStatusLine, setBotStatusLine] = useState("Small edges add up.");
+  const [lastMove, setLastMove] = useState(null);
+  const [botGlowSquare, setBotGlowSquare] = useState(null);
+  const [checkedKingSquare, setCheckedKingSquare] = useState(null);
 
   // castling rights
   const [castle, setCastle] = useState({ wK: true, wQ: true, bK: true, bQ: true });
 
-
   const botPlays = "b";
   const youColor = "w";
   const theme = useMemo(() => THEMES.find((t) => t.id === themeId) || THEMES[0], [themeId]);
-  const personality = BOT_PERSONALITIES[0];
+  const personality = useMemo(
+    () => BOT_PERSONALITIES.find((item) => item.id === personalityId) || BOT_PERSONALITIES[0],
+    [personalityId],
+  );
   const isDebug = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
 
   // rotate board so YOU are always at the bottom (like chess.com)
@@ -939,11 +924,6 @@ export default function App() {
     return { recentAvg, streak, accuracy };
   }, [moves, youColor, yourSummary.avgLoss]);
 
-  const botQuip = useMemo(() => {
-    const idx = moves.length % personality.quips.length;
-    return personality.quips[idx];
-  }, [moves.length, personality.quips]);
-
   useEffect(() => {
     initEngine().catch((error) => {
       console.error("Failed to initialize Stockfish", error);
@@ -963,6 +943,17 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(RATING_STORAGE_KEY, JSON.stringify(ratingState));
   }, [ratingState]);
+
+  useEffect(() => {
+    localStorage.setItem(PERSONALITY_STORAGE_KEY, personalityId);
+    setBotStatusLine(personality.quips[0]);
+  }, [personalityId, personality]);
+
+  useEffect(() => {
+    if (!botGlowSquare) return undefined;
+    const timer = setTimeout(() => setBotGlowSquare(null), 300);
+    return () => clearTimeout(timer);
+  }, [botGlowSquare]);
 
   async function handleSelfTest() {
     setSelfTestBusy(true);
@@ -995,7 +986,7 @@ export default function App() {
 
       try {
         const fen = boardToFen(board, turn, castle, moves.length);
-        const uci = await getBestMove(fen, currentMoveTimeMs);
+        const uci = await getBestMoveStyled(fen, personality.id, currentMoveTimeMs);
         if (cancelled) return;
 
         const parsed = parseUciMove(uci);
@@ -1025,6 +1016,10 @@ export default function App() {
         setMoves((prev) => [...prev, { ...mv, side: turn, loss }]);
         setTurn(nextTurn);
         setSelected(null);
+        setLastMove({ from: mv.from, to: mv.to });
+        setBotGlowSquare(mv.to);
+        setCheckedKingSquare(getCheckedKingSquare(nb, nextTurn));
+        setBotStatusLine(personality.quips[Math.floor(Math.random() * personality.quips.length)]);
 
         if (gr) {
           const nextMoves = [...moves, { ...mv, side: turn, loss }];
@@ -1107,6 +1102,10 @@ export default function App() {
     setResult(null);
     setCastle({ wK: true, wQ: true, bK: true, bQ: true });
     setStatus(`Your move (${colorToMoveName(youColor)})`);
+    setLastMove(null);
+    setCheckedKingSquare(null);
+    setBotGlowSquare(null);
+    setBotStatusLine(personality.quips[0]);
   }
 
 
@@ -1152,6 +1151,8 @@ export default function App() {
     setMoves((prev) => [...prev, { ...candidate, side: turn, loss }]);
     setTurn(nextTurn);
     setSelected(null);
+    setLastMove({ from: candidate.from, to: candidate.to });
+    setCheckedKingSquare(getCheckedKingSquare(nb, nextTurn));
 
     if (gr) {
       const nextMoves = [...moves, { ...candidate, side: turn, loss }];
@@ -1272,115 +1273,150 @@ Mode: <b>Rated</b>
                 </div>
               </div>
 
-              <div className="p-4 sm:p-6">
-                {/* Board frame */}
-                <div className="w-fit mx-auto rounded-3xl p-3 bg-neutral-950/40 border border-white/10 shadow-[0_20px_80px_rgba(0,0,0,0.6)]">
-                  {/* file labels top */}
-                  <div className="grid grid-cols-[18px_1fr_18px] items-center mb-2">
-                    <div />
-                    <div className="grid grid-cols-8 text-[10px] text-neutral-400 px-1">
-                      {(youColor === "w" ? FILES : FILES.split("").reverse().join("")).split("").map((ch) => (
-                        <div key={ch} className="text-center">
-                          {ch}
-                        </div>
-                      ))}
-                    </div>
-                    <div />
-                  </div>
-
-                  <div className="grid grid-cols-[18px_auto_18px] items-center gap-2">
-                    {/* rank labels left */}
-                    <div className="grid grid-rows-8 text-[10px] text-neutral-400">
-                      {(youColor === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8]).map((n) => (
-                        <div key={n} className="h-[clamp(46px,7vw,72px)] flex items-center justify-center">
-                          {n}
-                        </div>
-                      ))}
+              <div className="p-4 sm:p-6 space-y-4">
+                <div className="grid grid-cols-1 xl:grid-cols-[auto_280px] gap-4 items-start">
+                  {/* Board frame */}
+                  <div className="w-fit mx-auto rounded-3xl p-3 bg-neutral-950/40 border border-white/10 shadow-[0_20px_80px_rgba(0,0,0,0.6)]">
+                    {/* file labels top */}
+                    <div className="grid grid-cols-[18px_1fr_18px] items-center mb-2">
+                      <div />
+                      <div className="grid grid-cols-8 text-[10px] text-neutral-400 px-1">
+                        {(youColor === "w" ? FILES : FILES.split("").reverse().join("")).split("").map((ch) => (
+                          <div key={ch} className="text-center">
+                            {ch}
+                          </div>
+                        ))}
+                      </div>
+                      <div />
                     </div>
 
-                    {/* board */}
-                    <div className="grid grid-cols-8">
-                      {squares.map((sq) => {
-                        const { f, r } = sqToIdx(sq);
-                        const pc = board[r][f];
+                    <div className="grid grid-cols-[18px_auto_18px] items-center gap-2">
+                      <div className="grid grid-rows-8 text-[10px] text-neutral-400">
+                        {(youColor === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8]).map((n) => (
+                          <div key={n} className="h-[clamp(46px,7vw,72px)] flex items-center justify-center">
+                            {n}
+                          </div>
+                        ))}
+                      </div>
 
-                        // IMPORTANT: board colors should be based on true file/rank, not rotated indices
-                        const dark = (f + r) % 2 === 1;
+                      <div className="grid grid-cols-8">
+                        {squares.map((sq) => {
+                          const { f, r } = sqToIdx(sq);
+                          const pc = board[r][f];
+                          const dark = (f + r) % 2 === 1;
+                          const isSel = selected === sq;
+                          const isMove = legalForSelected.includes(sq);
+                          const isLastFrom = lastMove?.from === sq;
+                          const isLastTo = lastMove?.to === sq;
+                          const isCheckSquare = checkedKingSquare === sq;
+                          const isBotGlow = botGlowSquare === sq;
 
-                        const isSel = selected === sq;
-                        const isMove = legalForSelected.includes(sq);
-
-                        return (
-                          <button
-                            key={sq}
-                            onClick={() => handleSquareClick(sq)}
-                            className={[
-                              "relative",
-                              "h-[clamp(46px,7vw,72px)] w-[clamp(46px,7vw,72px)]",
-                              "grid place-items-center select-none transition",
-                              "focus:outline-none",
-                              "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]",
-                              "hover:brightness-110",
-                              isSel ? "z-10" : "",
-                              isMove ? "z-[5]" : "",
-                            ].join(" ")}
-                            style={{
-                              backgroundColor: dark ? theme.boardDark : theme.boardLight,
-                              boxShadow: isSel
-                                ? `0 0 0 2px ${theme.accent}`
-                                : isMove
-                                ? `0 0 0 2px ${theme.accentSoft}`
-                                : undefined,
-                            }}
-                            title={sq}
-                          >
-                            {/* move dot */}
-                            {isMove && !pc && (
-                              <span className="absolute w-3 h-3 rounded-full" style={{ backgroundColor: theme.accent }} />
-                            )}
-
-                            <span
+                          return (
+                            <button
+                              key={sq}
+                              onClick={() => handleSquareClick(sq)}
                               className={[
-                                "leading-none",
-                                "text-[clamp(30px,4.6vw,54px)]",
-                                "font-black",
-                                "transition-transform duration-75",
-                                isSel ? "scale-[1.06]" : "",
-                                pc?.c === "w"
-                                  ? "text-white [text-shadow:0_2px_0_rgba(0,0,0,0.95),0_0_0_2px_rgba(0,0,0,0.95),0_0_18px_rgba(255,255,255,0.18)]"
-                                  : "text-neutral-950 [text-shadow:0_2px_0_rgba(255,255,255,0.95),0_0_0_2px_rgba(255,255,255,0.95),0_0_14px_rgba(0,0,0,0.35)]",
+                                "relative",
+                                "h-[clamp(46px,7vw,72px)] w-[clamp(46px,7vw,72px)]",
+                                "grid place-items-center select-none transition",
+                                "focus:outline-none",
+                                "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]",
+                                "hover:brightness-110",
+                                isSel ? "z-10" : "",
+                                isMove ? "z-[5]" : "",
                               ].join(" ")}
+                              style={{
+                                backgroundColor: dark ? theme.boardDark : theme.boardLight,
+                                boxShadow: isSel
+                                  ? `0 0 0 2px ${theme.accent}`
+                                  : isMove
+                                  ? `0 0 0 2px ${theme.accentSoft}`
+                                  : undefined,
+                              }}
+                              title={sq}
                             >
-                              {pieceChar(pc)}
-                            </span>
-                          </button>
-                        );
-                      })}
+                              {(isLastFrom || isLastTo) && (
+                                <span className="absolute inset-0 pointer-events-none" style={{ backgroundColor: "rgba(248,113,113,0.24)" }} />
+                              )}
+                              {isCheckSquare && (
+                                <span className="absolute inset-0 pointer-events-none" style={{ backgroundColor: "rgba(251,191,36,0.35)" }} />
+                              )}
+                              {isBotGlow && (
+                                <span className="absolute inset-0 pointer-events-none animate-pulse" style={{ boxShadow: "inset 0 0 0 2px rgba(34,211,238,0.85), 0 0 24px rgba(34,211,238,0.65)", animationDuration: "300ms" }} />
+                              )}
+
+                              {isMove && !pc && (
+                                <span className="absolute w-3 h-3 rounded-full" style={{ backgroundColor: theme.accent }} />
+                              )}
+
+                              <span
+                                className={[
+                                  "leading-none",
+                                  "text-[clamp(30px,4.6vw,54px)]",
+                                  "font-black",
+                                  "transition-transform duration-75",
+                                  isSel ? "scale-[1.06]" : "",
+                                  pc?.c === "w"
+                                    ? "text-white [text-shadow:0_2px_0_rgba(0,0,0,0.95),0_0_0_2px_rgba(0,0,0,0.95),0_0_18px_rgba(255,255,255,0.18)]"
+                                    : "text-neutral-950 [text-shadow:0_2px_0_rgba(255,255,255,0.95),0_0_0_2px_rgba(255,255,255,0.95),0_0_14px_rgba(0,0,0,0.35)]",
+                                ].join(" ")}
+                              >
+                                {pieceChar(pc)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="grid grid-rows-8 text-[10px] text-neutral-400">
+                        {(youColor === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8]).map((n) => (
+                          <div key={n} className="h-[clamp(46px,7vw,72px)] flex items-center justify-center">
+                            {n}
+                          </div>
+                        ))}
+                      </div>
                     </div>
 
-                    {/* rank labels right */}
-                    <div className="grid grid-rows-8 text-[10px] text-neutral-400">
-                      {(youColor === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8]).map((n) => (
-                        <div key={n} className="h-[clamp(46px,7vw,72px)] flex items-center justify-center">
-                          {n}
-                        </div>
-                      ))}
+                    <div className="grid grid-cols-[18px_1fr_18px] items-center mt-2">
+                      <div />
+                      <div className="grid grid-cols-8 text-[10px] text-neutral-400 px-1">
+                        {(youColor === "w" ? FILES : FILES.split("").reverse().join("")).split("").map((ch) => (
+                          <div key={ch} className="text-center">
+                            {ch}
+                          </div>
+                        ))}
+                      </div>
+                      <div />
                     </div>
                   </div>
 
-                  {/* file labels bottom */}
-                  <div className="grid grid-cols-[18px_1fr_18px] items-center mt-2">
-                    <div />
-                    <div className="grid grid-cols-8 text-[10px] text-neutral-400 px-1">
-                      {(youColor === "w" ? FILES : FILES.split("").reverse().join("")).split("").map((ch) => (
-                        <div key={ch} className="text-center">
-                          {ch}
-                        </div>
-                      ))}
-                    </div>
-                    <div />
+                  <div className="rounded-2xl border border-white/10 bg-neutral-950/45 p-4 shadow-lg">
+                    <div className="text-sm uppercase tracking-wide text-neutral-300 mb-2">Coach</div>
+                    <CoachFeedback moves={moves} youColor={youColor} result={result} />
                   </div>
                 </div>
+
+                <div className="text-sm italic text-neutral-300 text-center xl:text-left">
+                  {personality.name}: {botStatusLine}
+                </div>
+
+                <details className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4">
+                  <summary className="cursor-pointer text-sm font-medium text-neutral-100">Bot Personality</summary>
+                  <div className="mt-3 grid gap-2">
+                    {BOT_PERSONALITIES.map((option) => (
+                      <button
+                        key={option.id}
+                        onClick={() => setPersonalityId(option.id)}
+                        className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-sm transition ${
+                          personalityId === option.id ? "border-white/40 bg-white/10" : "border-white/10 hover:bg-white/5"
+                        }`}
+                      >
+                        <span className="font-medium">{option.emoji} {option.name}</span>
+                        <span className="text-xs text-neutral-400">{option.tagline}</span>
+                      </button>
+                    ))}
+                  </div>
+                </details>
               </div>
             </div>
 
@@ -1401,20 +1437,6 @@ Mode: <b>Rated</b>
               </div>
 
               <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4">
-                  <div className="text-xs uppercase tracking-wide text-neutral-400">Bot personality</div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="text-2xl">{personality.emoji}</span>
-                    <div>
-                      <div className="font-semibold">{personality.name}</div>
-                      <div className="text-xs text-neutral-400">{personality.tagline}</div>
-                    </div>
-                  </div>
-                  <div className="mt-3 text-sm text-neutral-300">
-                    Bot status: <span className="font-medium text-neutral-100">“{botQuip}”</span>
-                  </div>
-                </div>
-
                 <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-4">
                   <div className="text-xs uppercase tracking-wide text-neutral-400">Theme</div>
                   <div className="mt-2 grid gap-2">
@@ -1480,7 +1502,6 @@ Mode: <b>Rated</b>
               </div>
             </div>
 
-            <CoachFeedback moves={moves} youColor={youColor} result={result} />
           </div>
 
           {/* Sidebar */}
