@@ -1,14 +1,21 @@
 const TITLE_BY_BUCKET = {
-  brilliant: { title: "Brilliant", emoji: "👑" },
-  great: { title: "Great", emoji: "🔥" },
-  good: { title: "Good", emoji: "✅" },
-  meh: { title: "Meh", emoji: "😐" },
-  inaccuracy: { title: "Inaccuracy", emoji: "🤨" },
-  mistake: { title: "Mistake", emoji: "💀" },
-  blunder: { title: "Blunder", emoji: "🚨" },
+  amazing: { title: "AMAZING", emoji: "🌟" },
+  brilliant: { title: "BRILLIANT", emoji: "👑" },
+  good: { title: "GOOD", emoji: "✅" },
+  meh: { title: "MEH", emoji: "😐" },
+  bad: { title: "BAD", emoji: "⚠️" },
+  awful: { title: "AWFUL", emoji: "💀" },
+  horrendous: { title: "HORRENDOUS", emoji: "🚨" },
   calm: { title: "Coach", emoji: "🧘" },
-  thinking: { title: "Coach is thinking", emoji: "🧠" },
+  thinking: { title: "Coach is thinking…", emoji: "🧠" },
 };
+
+export const amazingLines = [
+  "Engine-level touch. {move} was absolutely pristine.",
+  "That move was laser-accurate. Beautiful.",
+  "You found the top-tier continuation. Clean chess.",
+  "Perfect timing, perfect square, zero waste.",
+];
 
 export const brilliantLines = [
   "ARE YOU THE NEXT MAGNUS?? {move} had main-character energy.",
@@ -17,14 +24,6 @@ export const brilliantLines = [
   "Stockfish blinked. You didn’t.",
   "You just cooked a 3-course meal on this board.",
   "{move} was so crisp my screen gained 120Hz.",
-];
-
-export const greatLines = [
-  "Big brain route selected. {move} was heat.",
-  "You played that like you already saw the recap video.",
-  "Great move. No notes. Maybe one tiny flex.",
-  "Clean technique. Opponent definitely sighed.",
-  "That was tasteful violence.",
 ];
 
 export const goodLines = [
@@ -43,24 +42,21 @@ export const mehLines = [
   "Playable, but the vibes are questionable.",
 ];
 
-export const inaccuracyLines = [
-  "You just gave them a little gift basket.",
-  "We were winning and you said ‘nah’.",
-  "That’s the chess equivalent of tripping up the stairs.",
-  "Inaccuracy unlocked. Free initiative for the other side.",
-  "{move} was generous in all the wrong ways.",
+export const badLines = [
+  "That leaked too much eval. Time to stabilize.",
+  "Bad miss. You gave them practical chances.",
+  "You slipped there. Tighten up next move.",
+  "That was a rough decision under pressure.",
 ];
 
-export const mistakeLines = [
-  "Brother… what are we doing.",
-  "You had ONE job: don’t drop the position.",
-  "That’s a blunder in slow motion.",
-  "We had the eval in a safe place and then {move} happened.",
+export const awfulLines = [
+  "Big drop. That hurt.",
+  "Awful. You just handed over serious advantage.",
   "That move was sponsored by chaos.",
-  "I need a replay because surely that was lag.",
+  "You had one job: keep it together.",
 ];
 
-export const blunderLines = [
+export const horrendousLines = [
   "That’s worse than the toilet after my Chipotle yesterday.",
   "You just donated that piece like it’s charity week.",
   "Congratulations, you invented a new losing line.",
@@ -78,23 +74,23 @@ export const thinkingLines = [
 ];
 
 const calmLines = {
-  brilliant: ["Excellent move. Keep this level of precision."],
-  great: ["Great choice. You improved your position."],
+  amazing: ["Amazing move. Practically no loss."],
+  brilliant: ["Brilliant move. Strong precision."],
   good: ["Good move. Position remains healthy."],
   meh: ["Playable move. There were stronger options."],
-  inaccuracy: ["Inaccuracy. Try to keep more pressure next move."],
-  mistake: ["Mistake. This gave away significant evaluation."],
-  blunder: ["Blunder. Tactical danger increased sharply."],
+  bad: ["Bad move. You gave away noticeable eval."],
+  awful: ["Awful move. Major evaluation drop."],
+  horrendous: ["Horrendous move. Critical damage to the position."],
 };
 
 const linesByBucket = {
+  amazing: amazingLines,
   brilliant: brilliantLines,
-  great: greatLines,
   good: goodLines,
   meh: mehLines,
-  inaccuracy: inaccuracyLines,
-  mistake: mistakeLines,
-  blunder: blunderLines,
+  bad: badLines,
+  awful: awfulLines,
+  horrendous: horrendousLines,
   thinking: thinkingLines,
 };
 
@@ -110,20 +106,30 @@ function injectContext(line, context = {}) {
 
 export function getCoachLine(bucket, context = {}) {
   const normalizedBucket = linesByBucket[bucket] ? bucket : "meh";
+  const cpl = Number.isFinite(context?.cpl) ? context.cpl : null;
+
+  // Safety rail: never praise huge losses and never insult tiny losses.
+  const guardedBucket =
+    cpl !== null && cpl >= 150 && ["amazing", "brilliant", "good"].includes(normalizedBucket)
+      ? "awful"
+      : cpl !== null && cpl <= 15 && ["bad", "awful", "horrendous"].includes(normalizedBucket)
+      ? "brilliant"
+      : normalizedBucket;
+
   const recent = context?.recentLines || [];
   const roastMode = context?.roastMode !== false;
   const pool = roastMode
-    ? linesByBucket[normalizedBucket] || mehLines
-    : calmLines[normalizedBucket] || calmLines.meh;
+    ? linesByBucket[guardedBucket] || mehLines
+    : calmLines[guardedBucket] || calmLines.meh;
 
   const candidates = pool.filter((line) => !recent.includes(injectContext(line, context)));
   const selectedPool = candidates.length ? candidates : pool;
   const template = selectedPool[Math.floor(Math.random() * selectedPool.length)] || pool[0] || "Solid move.";
   const line = injectContext(template, context);
 
-  const header = TITLE_BY_BUCKET[normalizedBucket] || TITLE_BY_BUCKET.meh;
-  if (!roastMode && normalizedBucket !== "thinking") {
-    return { title: `${header.title} (${context?.cpl ?? "--"} CPL)`, line, emoji: "🧘" };
+  const header = TITLE_BY_BUCKET[guardedBucket] || TITLE_BY_BUCKET.meh;
+  if (!roastMode && guardedBucket !== "thinking") {
+    return { title: header.title, line, emoji: "🧘" };
   }
   return { title: header.title, line, emoji: header.emoji };
 }

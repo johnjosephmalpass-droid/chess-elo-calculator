@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachRoast from "./CoachRoast";
-import { evaluatePosition, getBestMoveStyled, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
+import { evaluateFen, evaluatePosition, getBestMoveStyled, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
 import { getCoachLine } from "./coachRoastLines";
 import {
   chooseBotElo,
@@ -568,19 +568,37 @@ function classifyLoss(cpLoss) {
   return "ok";
 }
 
-function classifyCoachBucket({ cpLoss, scoreBefore, scoreAfter, afterType, youColor, fenAfter }) {
-  const evalDelta = Math.round(scoreAfter - scoreBefore);
-  const sideToMove = sideToMoveFromFen(fenAfter);
-  const forcedMateAgainstUser = afterType === "mate" && sideToMove !== youColor && scoreAfter <= -9100;
+function normalizeEval(scoreObj, sideToMove, userColor) {
+  if (!scoreObj) return 0;
 
-  if (forcedMateAgainstUser) return { bucket: "blunder", evalDelta };
-  if (cpLoss <= 5 || evalDelta > 150) return { bucket: "brilliant", evalDelta };
-  if (cpLoss <= 15) return { bucket: "great", evalDelta };
-  if (cpLoss <= 40) return { bucket: "good", evalDelta };
-  if (cpLoss >= 300) return { bucket: "blunder", evalDelta };
-  if (cpLoss >= 150) return { bucket: "mistake", evalDelta };
-  if (cpLoss >= 80) return { bucket: "inaccuracy", evalDelta };
-  return { bucket: "meh", evalDelta };
+  if (scoreObj.type === "mate" && Number.isFinite(scoreObj.mate)) {
+    const sign = Math.sign(scoreObj.mate || 1);
+    const absDistance = Math.min(99, Math.abs(scoreObj.mate));
+    const cpFromSideToMove = sign * (10000 - absDistance * 100);
+    return sideToMove === userColor ? cpFromSideToMove : -cpFromSideToMove;
+  }
+
+  const cpFromSideToMove = Number.isFinite(scoreObj.cp) ? scoreObj.cp : 0;
+  return sideToMove === userColor ? cpFromSideToMove : -cpFromSideToMove;
+}
+
+function classifyCoachBucket({ cpl, evalBefore, evalAfter }) {
+  const isMateAgainstUser = evalAfter?.type === "mate" && Number.isFinite(evalAfter?.mate) && evalAfter.mate > 0;
+  const mateWorsened =
+    evalBefore?.type === "mate" &&
+    Number.isFinite(evalBefore?.mate) &&
+    evalBefore.mate > 0 &&
+    Number.isFinite(evalAfter?.mate) &&
+    evalAfter.mate > evalBefore.mate;
+
+  if (isMateAgainstUser || mateWorsened) return "horrendous";
+  if (cpl <= 5) return "amazing";
+  if (cpl <= 15) return "brilliant";
+  if (cpl <= 40) return "good";
+  if (cpl <= 90) return "meh";
+  if (cpl <= 150) return "bad";
+  if (cpl <= 250) return "awful";
+  return "horrendous";
 }
 
 function sideToMoveFromFen(fen) {
@@ -588,9 +606,7 @@ function sideToMoveFromFen(fen) {
 }
 
 function scoreFromUserPerspective(scoreObj, fen, youColor) {
-  const cp = scoreObj?.cp ?? 0;
-  const sideToMove = sideToMoveFromFen(fen);
-  return sideToMove === youColor ? cp : -cp;
+  return normalizeEval(scoreObj, sideToMoveFromFen(fen), youColor);
 }
 
 async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
@@ -897,6 +913,7 @@ export default function App() {
   });
   const [coachIsThinking, setCoachIsThinking] = useState(false);
   const [recentCoachLines, setRecentCoachLines] = useState([]);
+  const [coachDebug, setCoachDebug] = useState(null);
   const [showResetModal, setShowResetModal] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
 
@@ -998,6 +1015,7 @@ export default function App() {
     if (!coachState.lastUserMove || coachIsThinking) return;
     const message = getCoachLine(coachState.bucket, {
       san: coachState.lastUserMove.san,
+      cpl: coachState.cpl,
       recentLines: recentCoachLines,
       roastMode,
     });
@@ -1030,32 +1048,36 @@ export default function App() {
     }));
 
     try {
-      const [beforeEval, afterEval] = await Promise.all([evaluatePosition(fenBefore, 80), evaluatePosition(fenAfter, 80)]);
+      const beforeEval = await evaluateFen(fenBefore, { movetimeMs: 90 });
+      const afterEval = await evaluateFen(fenAfter, { movetimeMs: 90 });
 
-      const scoreBefore = scoreFromUserPerspective(beforeEval, fenBefore, youColor);
-      const scoreAfter = scoreFromUserPerspective(afterEval, fenAfter, youColor);
-      const cpl = Math.max(0, Math.round(scoreBefore - scoreAfter));
-      const { bucket, evalDelta } = classifyCoachBucket({
-        cpLoss: cpl,
-        scoreBefore,
-        scoreAfter,
-        afterType: afterEval?.type,
-        youColor,
-        fenAfter,
-      });
+      const userEvalBefore = normalizeEval(beforeEval, sideToMoveFromFen(fenBefore), youColor);
+      const userEvalAfter = normalizeEval(afterEval, sideToMoveFromFen(fenAfter), youColor);
+      const cpl = Math.max(0, Math.round(userEvalBefore - userEvalAfter));
+      const bucket = classifyCoachBucket({ cpl, evalBefore: beforeEval, evalAfter: afterEval });
 
-      const message = getCoachLine(bucket, { san: move.san, recentLines: recentCoachLines, roastMode });
+      const message = getCoachLine(bucket, { san: move.san, cpl, recentLines: recentCoachLines, roastMode });
       setCoachState({
         lastUserMove: move,
         cpl,
         bucket,
-        evalDelta,
+        evalDelta: Math.round(userEvalAfter - userEvalBefore),
         message,
       });
-      setRecentCoachLines((prev) => [message.line, ...prev].slice(0, 2));
+      setCoachDebug({
+        fenBefore,
+        fenAfter,
+        rawBefore: beforeEval,
+        rawAfter: afterEval,
+        userEvalBefore,
+        userEvalAfter,
+        cpl,
+        bucket,
+      });
+      setRecentCoachLines((prev) => [message.line, ...prev].slice(0, 3));
     } catch (error) {
       console.error("Coach evaluation failed", error);
-      const message = getCoachLine("meh", { san: move.san, recentLines: recentCoachLines, roastMode });
+      const message = getCoachLine("meh", { san: move.san, cpl: null, recentLines: recentCoachLines, roastMode });
       setCoachState({
         lastUserMove: move,
         cpl: null,
@@ -1063,7 +1085,8 @@ export default function App() {
         evalDelta: null,
         message,
       });
-      setRecentCoachLines((prev) => [message.line, ...prev].slice(0, 2));
+      setCoachDebug({ fenBefore, fenAfter, error: error?.message || "Unknown coach eval error" });
+      setRecentCoachLines((prev) => [message.line, ...prev].slice(0, 3));
     } finally {
       setCoachIsThinking(false);
     }
@@ -1205,6 +1228,7 @@ export default function App() {
     setBotStatusLine(personality.quips[0]);
     setCoachIsThinking(false);
     setRecentCoachLines([]);
+    setCoachDebug(null);
     setCoachState({
       lastUserMove: null,
       cpl: null,
@@ -1221,6 +1245,7 @@ export default function App() {
     setLastGameSummaryForBot(null);
     setLastRatedSummary(null);
     setDebugInfo(null);
+    setCoachDebug(null);
     setBotEloUsedThisGame(1200);
     setCurrentMoveTimeMs(mapMovetimeFromElo(1200));
     reset();
@@ -1626,6 +1651,64 @@ Mode: <b>Rated</b>
               </div>
             </div>
 
+
+            {/* Live analysis below board */}
+            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 space-y-4">
+              <h2 className="font-semibold text-lg">Live analysis</h2>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-3">
+                  <div className="text-xs text-neutral-400">Accuracy pulse</div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <div className="text-lg font-semibold text-white">{analysis.accuracy}%</div>
+                    <div className="text-xs text-neutral-400">based on avg loss</div>
+                  </div>
+                  <div className="mt-2 h-2 rounded-full bg-white/10 overflow-hidden">
+                    <div className="h-full" style={{ width: `${analysis.accuracy}%`, background: theme.accent }} />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-3">
+                  <div className="text-xs text-neutral-400">Momentum (last 5)</div>
+                  <div className="mt-1 text-lg font-semibold text-white">
+                    {analysis.recentAvg === null ? "--" : `${analysis.recentAvg}cp`}
+                  </div>
+                  <div className="text-xs text-neutral-400 mt-1">
+                    {analysis.recentAvg === null
+                      ? "Play a few moves to unlock trends."
+                      : analysis.recentAvg < yourSummary.avgLoss
+                      ? "Trending up. Keep the pressure!"
+                      : "Steady. Look for one tactical upgrade."}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-3">
+                  <div className="text-xs text-neutral-400">Good-move streak</div>
+                  <div className="mt-1 text-lg font-semibold text-white">{analysis.streak}</div>
+                  <div className="text-xs text-neutral-400 mt-1">
+                    {analysis.streak >= 4
+                      ? "You’re in the zone. Stay calm."
+                      : "String 4 clean moves for a streak bonus."}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {isDebug && coachDebug ? (
+              <div className="rounded-3xl border border-amber-300/25 bg-amber-500/10 p-4 text-xs space-y-1">
+                <div className="font-semibold text-amber-100">Coach debug (?debug=1)</div>
+                <div className="text-amber-50/90 break-all">fenBefore: {coachDebug.fenBefore}</div>
+                <div className="text-amber-50/90 break-all">fenAfter: {coachDebug.fenAfter}</div>
+                <div className="text-amber-50/90">raw evalBefore: {JSON.stringify(coachDebug.rawBefore)}</div>
+                <div className="text-amber-50/90">raw evalAfter: {JSON.stringify(coachDebug.rawAfter)}</div>
+                <div className="text-amber-50/90">normalized before: {coachDebug.userEvalBefore ?? "--"}</div>
+                <div className="text-amber-50/90">normalized after: {coachDebug.userEvalAfter ?? "--"}</div>
+                <div className="text-amber-50/90">computed CPL: {coachDebug.cpl ?? "--"}</div>
+                <div className="text-amber-50/90">bucket: {coachDebug.bucket ?? "--"}</div>
+                {coachDebug.error ? <div className="text-rose-200">error: {coachDebug.error}</div> : null}
+              </div>
+            ) : null}
+
             {/* Lists */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {/* Moves */}
@@ -1671,45 +1754,6 @@ Mode: <b>Rated</b>
                   onToggleRoastMode={() => setRoastMode((prev) => !prev)}
                   coachMessage={coachState.message}
                 />
-              </div>
-
-              <h2 className="font-semibold text-lg">Live analysis</h2>
-
-              <div className="grid gap-3">
-                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-3">
-                  <div className="text-xs text-neutral-400">Accuracy pulse</div>
-                  <div className="mt-1 flex items-center justify-between">
-                    <div className="text-lg font-semibold text-white">{analysis.accuracy}%</div>
-                    <div className="text-xs text-neutral-400">based on avg loss</div>
-                  </div>
-                  <div className="mt-2 h-2 rounded-full bg-white/10 overflow-hidden">
-                    <div className="h-full" style={{ width: `${analysis.accuracy}%`, background: theme.accent }} />
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-3">
-                  <div className="text-xs text-neutral-400">Momentum (last 5)</div>
-                  <div className="mt-1 text-lg font-semibold text-white">
-                    {analysis.recentAvg === null ? "--" : `${analysis.recentAvg}cp`}
-                  </div>
-                  <div className="text-xs text-neutral-400 mt-1">
-                    {analysis.recentAvg === null
-                      ? "Play a few moves to unlock trends."
-                      : analysis.recentAvg < yourSummary.avgLoss
-                      ? "Trending up. Keep the pressure!"
-                      : "Steady. Look for one tactical upgrade."}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-neutral-950/40 p-3">
-                  <div className="text-xs text-neutral-400">Good-move streak</div>
-                  <div className="mt-1 text-lg font-semibold text-white">{analysis.streak}</div>
-                  <div className="text-xs text-neutral-400 mt-1">
-                    {analysis.streak >= 4
-                      ? "You’re in the zone. Stay calm."
-                      : "String 4 clean moves for a streak bonus."}
-                  </div>
-                </div>
               </div>
 
               <div className="p-4 rounded-2xl bg-neutral-950/40 border border-white/10">
