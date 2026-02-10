@@ -537,9 +537,14 @@ async function stockfishLossForMove(boardBefore, mv, side, castle, plyCount, thi
     evaluatePosition(bestFen, thinkMs),
   ]);
 
-  const playedCp = playedEval?.cp || 0;
-  const bestCp = bestEval?.cp || 0;
-  const cpLoss = Math.max(0, Math.round(playedCp - bestCp));
+  // Stockfish `score cp` is reported from White's perspective.
+  // Convert both continuations to the perspective of the side that just moved
+  // so cp-loss is positive when the played move is worse than the best move.
+  const playedCp = playedEval?.cp ?? 0;
+  const bestCp = bestEval?.cp ?? 0;
+  const playedFromMoverPerspective = side === "w" ? playedCp : -playedCp;
+  const bestFromMoverPerspective = side === "w" ? bestCp : -bestCp;
+  const cpLoss = Math.max(0, Math.round(bestFromMoverPerspective - playedFromMoverPerspective));
   return { cpLoss, classification: classifyLoss(cpLoss) };
 }
 
