@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CoachRoast from "./CoachRoast";
 import { getBestMoveStyled, initEngine, runSelfTest, setStrength } from "./stockfishEngine.js";
-import { computeMoveLossVsBest } from "./rating/evalEngine.js";
+import { computeUserMoveLoss } from "./lib/engineEval.js";
 import { getCoachLine } from "./coachRoastLines";
 import {
   applyGameResult,
   chooseOpponentElo,
   getInitialRatingState,
   mapMovetimeFromElo,
-} from "./rating/ratingEngine.js";
+} from "./lib/rating.js";
 import { RATING_STORAGE_KEY, resetCalibrationStorage } from "./storage/resetCalibration.js";
 import { Chess } from "chess.js";
 
@@ -574,18 +574,15 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
 
   for (let index = 0; index < userMoveSnapshots.length; index += 1) {
     const snapshot = userMoveSnapshots[index];
-    const moveLoss = await computeMoveLossVsBest(snapshot.fenBefore, moveToUci(snapshot.move), youColor, movetimeMs);
+    const moveLoss = await computeUserMoveLoss(snapshot.fenBefore, moveToUci(snapshot.move), { playerColor: youColor, thinkTimeMs: movetimeMs });
     const cpLoss = moveLoss.moveLossCp;
     cplList.push(cpLoss);
     moveBreakdown.push({
       move: moveToUci(snapshot.move),
       cpLoss,
-      bestBeforeCp: moveLoss.bestBeforeCp,
-      afterCp: moveLoss.afterCp,
+      bestBeforeCp: moveLoss.bestBeforePlayerCp,
+      afterCp: moveLoss.afterUserPlayerCp,
       classification: classifyLoss(cpLoss),
-      grade: moveLoss.grade,
-      catastrophicByMaterial: moveLoss.catastrophicByMaterial,
-      materialDelta: moveLoss.materialDelta,
     });
 
     if ((index + 1) % YIELD_EVERY === 0) {
@@ -601,6 +598,7 @@ async function analyzeGameWithStockfish({ moves, youColor, movetimeMs = 100 }) {
 
 const PERSONALITY_STORAGE_KEY = "chess-elo-calculator:bot-personality";
 const ROAST_MODE_STORAGE_KEY = "chess-elo-calculator:roast-mode";
+const USER_ID_STORAGE_KEY = "chess-elo-calculator:user-id";
 
 const THEMES = [
   {
@@ -777,11 +775,11 @@ export default function App() {
   const initialRatingState = useMemo(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(RATING_STORAGE_KEY) || "null");
-      return parsed && typeof parsed.playerElo === "number" && Number.isFinite(parsed.gamesRated)
+      return parsed && Number.isFinite(parsed.gamesRated)
         ? {
             ...getInitialRatingState(),
             ...parsed,
-            confidence: parsed.confidence || "Low",
+            confidence: parsed.confidence || "Uncalibrated",
           }
         : getInitialRatingState();
     } catch {
@@ -794,7 +792,7 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [status, setStatus] = useState("Play");
   const [botEloUsedThisGame, setBotEloUsedThisGame] = useState(1200);
-  const [currentMoveTimeMs, setCurrentMoveTimeMs] = useState(200);
+  const [currentMoveTimeMs, setCurrentMoveTimeMs] = useState(300);
   const [selfTestResult, setSelfTestResult] = useState("");
   const [selfTestError, setSelfTestError] = useState("");
   const [selfTestBusy, setSelfTestBusy] = useState(false);
@@ -802,7 +800,6 @@ export default function App() {
   const [moves, setMoves] = useState([]); // {from,to,promo,side,loss}
   const [result, setResult] = useState(null);
   const [lastRatedSummary, setLastRatedSummary] = useState(null);
-  const [lastGameSummaryForBot, setLastGameSummaryForBot] = useState(initialRatingState.lastGameSummary || null);
   const [debugInfo, setDebugInfo] = useState(null);
   const [ratingState, setRatingState] = useState(initialRatingState);
   const [personalityId, setPersonalityId] = useState(() => {
@@ -837,7 +834,14 @@ export default function App() {
     () => BOT_PERSONALITIES.find((item) => item.id === personalityId) || BOT_PERSONALITIES[0],
     [personalityId],
   );
-  const isDebug = useMemo(() => new URLSearchParams(window.location.search).get("debug") === "1", []);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const userId = useMemo(() => {
+    const existing = localStorage.getItem(USER_ID_STORAGE_KEY);
+    if (existing) return existing;
+    const created = `u-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(USER_ID_STORAGE_KEY, created);
+    return created;
+  }, []);
 
   // rotate board so YOU are always at the bottom (like chess.com)
   const squares = useMemo(() => {
@@ -887,14 +891,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const nextBotElo = chooseOpponentElo(ratingState, lastGameSummaryForBot?.performanceElo);
+    const nextBotElo = chooseOpponentElo(ratingState, { userId, gameIndex: ratingState.gamesRated + 1 });
     const nextMoveTime = mapMovetimeFromElo(nextBotElo);
     setBotEloUsedThisGame(nextBotElo);
     setCurrentMoveTimeMs(nextMoveTime);
     setStrength({ elo: nextBotElo, movetimeMs: nextMoveTime }).catch((error) => {
       console.error("Failed to set bot strength", error);
     });
-  }, [ratingState, lastGameSummaryForBot]);
+  }, [ratingState, userId]);
 
   useEffect(() => {
     localStorage.setItem(RATING_STORAGE_KEY, JSON.stringify(ratingState));
@@ -958,26 +962,25 @@ export default function App() {
     }));
 
     try {
-      const moveLoss = await computeMoveLossVsBest(fenBefore, moveToUci(move), youColor, 70);
+      const moveLoss = await computeUserMoveLoss(fenBefore, moveToUci(move), { playerColor: youColor, thinkTimeMs: 300 });
 
       const cpl = moveLoss.moveLossCp;
-      const bucket = coachBucketFromGradeLabel(moveLoss.grade);
+      const bucket = coachBucketFromGradeLabel(classifyLoss(cpl));
 
       const message = getCoachLine(bucket, { san: move.san, cpl, recentLines: recentCoachLines, roastMode });
       setCoachState({
         lastUserMove: move,
         cpl,
         bucket,
-        evalDelta: Math.round(moveLoss.afterCp - moveLoss.bestBeforeCp),
+        evalDelta: Math.round(moveLoss.afterUserPlayerCp - moveLoss.bestBeforePlayerCp),
         message,
       });
       setCoachDebug({
         fenBefore,
         fenAfter,
-        bestBeforeCp: moveLoss.bestBeforeCp,
-        afterCp: moveLoss.afterCp,
+        bestBeforeCp: moveLoss.bestBeforePlayerCp,
+        afterCp: moveLoss.afterUserPlayerCp,
         moveLossCp: cpl,
-        grade: moveLoss.grade,
       });
       setRecentCoachLines((prev) => [message.line, ...prev].slice(0, 3));
       return moveLoss;
@@ -1102,32 +1105,35 @@ export default function App() {
     setRatingState(ratingUpdate.nextState);
     setLastRatedSummary({
       playerElo: ratingUpdate.nextState.playerElo,
-      uncertainty: ratingUpdate.summary.uncertainty,
-      confidence: ratingUpdate.summary.confidence,
+      sigma: ratingUpdate.nextState.sigma,
+      confidence: ratingUpdate.nextState.confidence,
       rangeLow: ratingUpdate.nextState.rangeLow,
       rangeHigh: ratingUpdate.nextState.rangeHigh,
       performanceElo: ratingUpdate.summary.performanceElo,
     });
-    setLastGameSummaryForBot(ratingUpdate.nextState.lastGameSummary);
     if (wasUncalibrated) {
       setToastMessage(
-        `First estimate ready: ${ratingUpdate.nextState.playerElo} (±${ratingUpdate.summary.uncertainty})`,
+        `First estimate ready: ${ratingUpdate.nextState.playerElo} (±${ratingUpdate.nextState.sigma})`,
       );
     }
     setDebugInfo({
       botEloUsedThisGame,
       performanceElo: ratingUpdate.summary.performanceElo,
-      playerEloBefore: ratingUpdate.summary.playerEloBefore,
-      playerEloAfter: ratingUpdate.summary.playerEloAfter,
-      uncertainty: ratingUpdate.summary.uncertainty,
+      estEloBefore: ratingUpdate.summary.estEloBefore,
+      estEloAfter: ratingUpdate.summary.estEloAfter,
+      sigmaBefore: ratingUpdate.summary.sigmaBefore,
+      sigmaAfter: ratingUpdate.summary.sigmaAfter,
       acpl: ratingUpdate.summary.acpl,
+      weightedACPL: ratingUpdate.summary.weightedACPL,
       blunders: ratingUpdate.summary.blunders,
       mistakes: ratingUpdate.summary.mistakes,
       inaccuracies: ratingUpdate.summary.inaccuracies,
-      kFactor: ratingUpdate.summary.kFactor,
       expectedScore: ratingUpdate.summary.expectedScore,
+      actualScore: ratingUpdate.summary.actualScore,
+      qualityScore: ratingUpdate.summary.qualityScore,
+      qualityEloDelta: ratingUpdate.summary.qualityEloDelta,
+      resultDelta: ratingUpdate.summary.resultDelta,
       alpha: ratingUpdate.summary.alpha,
-      maxDelta: ratingUpdate.summary.maxDelta,
       lastMoveDebug: analysisSummary.moveBreakdown?.[analysisSummary.moveBreakdown.length - 1] || null,
     });
   }
@@ -1160,12 +1166,11 @@ export default function App() {
     const freshRatingState = getInitialRatingState();
     resetCalibrationStorage();
     setRatingState(freshRatingState);
-    setLastGameSummaryForBot(null);
     setLastRatedSummary(null);
     setDebugInfo(null);
     setCoachDebug(null);
     setBotEloUsedThisGame(1200);
-    setCurrentMoveTimeMs(mapMovetimeFromElo(1200));
+    setCurrentMoveTimeMs(300);
     reset();
     setCoachState({
       lastUserMove: null,
@@ -1327,6 +1332,13 @@ Mode: <b>Rated</b>
                 >
                   Reset
                 </button>
+                <button
+                  onClick={() => setShowDebugPanel((prev) => !prev)}
+                  className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-200 text-sm transition"
+                  title="Toggle debug panel"
+                >
+                  🛠
+                </button>
               </div>
             </div>
 
@@ -1357,13 +1369,13 @@ Mode: <b>Rated</b>
                   </div>
                 </details>
               ) : null}
-              {isDebug && debugInfo ? (
+              {showDebugPanel && debugInfo ? (
                 <div className="text-xs text-sky-200 mt-2 space-y-1">
                   <div>
-                    debug — oppElo: {debugInfo.botEloUsedThisGame} · ACPL: {debugInfo.acpl} · blunders: {debugInfo.blunders} · mistakes: {debugInfo.mistakes} · inaccuracies: {debugInfo.inaccuracies} · perf: {debugInfo.performanceElo} · Elo: {debugInfo.playerEloBefore}→{debugInfo.playerEloAfter} · uncertainty: ±{debugInfo.uncertainty}
+                    botElo: {debugInfo.botEloUsedThisGame} · expected: {debugInfo.expectedScore?.toFixed?.(3)} · actual: {debugInfo.actualScore} · ACPL: {debugInfo.acpl} · weighted ACPL: {debugInfo.weightedACPL} · inacc/mis/bl: {debugInfo.inaccuracies}/{debugInfo.mistakes}/{debugInfo.blunders}
                   </div>
                   <div>
-                    last move — bestBeforeCp: {debugInfo.lastMoveDebug?.bestBeforeCp ?? "--"} · afterCp: {debugInfo.lastMoveDebug?.afterCp ?? "--"} · moveLossCp: {debugInfo.lastMoveDebug?.cpLoss ?? "--"}
+                    qualityScore: {debugInfo.qualityScore?.toFixed?.(3)} · qualityΔ: {Math.round(debugInfo.qualityEloDelta || 0)} · resultΔ: {Math.round(debugInfo.resultDelta || 0)} · perfElo: {debugInfo.performanceElo} · est: {debugInfo.estEloBefore ?? "--"}→{debugInfo.estEloAfter} · sigma: {debugInfo.sigmaBefore ?? "--"}→{debugInfo.sigmaAfter}
                   </div>
                 </div>
               ) : null}
@@ -1636,9 +1648,9 @@ Mode: <b>Rated</b>
               </div>
             </div>
 
-            {isDebug && coachDebug ? (
+            {showDebugPanel && coachDebug ? (
               <div className="rounded-3xl border border-amber-300/25 bg-amber-500/10 p-4 text-xs space-y-1">
-                <div className="font-semibold text-amber-100">Coach debug (?debug=1)</div>
+                <div className="font-semibold text-amber-100">Coach debug</div>
                 <div className="text-amber-50/90 break-all">fenBefore: {coachDebug.fenBefore}</div>
                 <div className="text-amber-50/90 break-all">fenAfter: {coachDebug.fenAfter}</div>
                 <div className="text-amber-50/90">bestBeforeCp: {coachDebug.bestBeforeCp ?? "--"}</div>
